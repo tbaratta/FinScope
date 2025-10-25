@@ -18,6 +18,12 @@ async function fetchAlphaDaily(symbol, apiKey) {
   return { labels, values, last: values[values.length-1] }
 }
 
+async function fetchYfViaPython(pyUrl, symbol, period='1mo', interval='1d') {
+  const { data } = await axios.get(`${pyUrl}/market`, { params: { symbol, period, interval }, timeout: 15000 })
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
 async function fetchFredSeries(seriesId, apiKey) {
   const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${apiKey}&file_type=json`
   const { data } = await axios.get(url, { timeout: 15000 })
@@ -32,14 +38,17 @@ router.get('/summary', async (_req, res) => {
     const now = Date.now()
     if (cache.summary && (now - cache.ts < ttlMs)) return res.json(cache.summary)
 
-    const { ALPHAVANTAGE_API_KEY, FRED_API_KEY } = process.env
-    if (!ALPHAVANTAGE_API_KEY || !FRED_API_KEY) {
-      return res.status(500).json({ error: 'Missing API keys: set ALPHAVANTAGE_API_KEY and FRED_API_KEY in .env' })
+
+    const { FRED_API_KEY, ALPHAVANTAGE_API_KEY } = process.env
+    if (!FRED_API_KEY || !ALPHAVANTAGE_API_KEY) {
+      return res.status(500).json({ error: 'Missing API keys: set FRED_API_KEY and ALPHAVANTAGE_API_KEY in .env' })
     }
 
-    // S&P proxy: SPY
+    // S&P proxy: SPY via AlphaVantage (equities)
     const spy = await fetchAlphaDaily('SPY', ALPHAVANTAGE_API_KEY)
-    // BTC proxy: use BTC-USD via AlphaVantage digital currency daily (simpler: use SPY trend for the chart but provide real cards)
+    // BTC via yfinance through Python service
+    const pyUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000'
+    const btc = await fetchYfViaPython(pyUrl, 'BTC-USD', '1mo', '1d')
     // 10Y yield
     const dgs10 = await fetchFredSeries('DGS10', FRED_API_KEY)
     // CPI YoY: compute from CPIAUCSL
@@ -55,6 +64,7 @@ router.get('/summary', async (_req, res) => {
     const summary = {
       cards: [
         { label: 'S&P 500 (SPY)', value: spy.last.toLocaleString(undefined, { maximumFractionDigits: 2 }), delta: null },
+        { label: 'BTC/USD', value: btc?.last != null ? btc.last.toLocaleString(undefined, { maximumFractionDigits: 2 }) : 'N/A', delta: null },
         { label: '10Y Yield', value: `${dgs10.last.toFixed(2)}%`, delta: null },
         { label: 'CPI YoY', value: cpiYoY !== null ? `${cpiYoY.toFixed(2)}%` : 'N/A', delta: null }
       ],

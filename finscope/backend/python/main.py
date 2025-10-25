@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Body
+from fastapi import FastAPI, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
@@ -6,6 +6,7 @@ import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.linear_model import LinearRegression
 from typing import List, Optional
+import yfinance as yf
 
 app = FastAPI(title="FinScope Python Service")
 app.add_middleware(
@@ -80,3 +81,23 @@ async def simulate(sim: SimInput):
         "expected_risk_change_pct": -impact,
         "expected_return_change_pct": impact
     }
+
+@app.get("/market")
+async def market(
+    symbol: str = Query(..., description="Ticker symbol, e.g., SPY"),
+    period: str = Query("1mo", description="yfinance period, e.g., 1mo, 3mo, 6mo, 1y"),
+    interval: str = Query("1d", description="yfinance interval, e.g., 1d, 1h")
+):
+    """Fetch market time-series via yfinance. Returns labels (dates) and values (close)."""
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period=period, interval=interval, auto_adjust=False)
+        if hist is None or hist.empty:
+            return {"error": "No data returned from yfinance"}
+        # Ensure index is string dates
+        labels = [str(x.date()) if hasattr(x, 'date') else str(x) for x in hist.index]
+        values = hist['Close'].astype(float).tolist()
+        last = float(values[-1]) if values else None
+        return {"symbol": symbol, "labels": labels, "values": values, "last": last}
+    except Exception as e:
+        return {"error": str(e)}

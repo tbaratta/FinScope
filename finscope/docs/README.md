@@ -7,7 +7,7 @@ FinScope is a hackathon-ready, multi-agent financial intelligence dashboard powe
 - Backend: Node.js (Express) + Python (FastAPI microservice)
 - Database: MongoDB Atlas (optional)
 - AI/Agents: Google ADK (Gemini 2.5 Flash) configs
-- APIs: Yahoo Finance, AlphaVantage, NewsAPI, FRED (live data; requires API keys)
+- APIs: AlphaVantage (equities), yfinance via Python (crypto/others), NewsAPI, FRED (live data; FRED/AlphaVantage keys required)
 - Auth: Supabase
 - Reports: PDF via Node (pdfkit)
 
@@ -70,7 +70,7 @@ cd finscope/frontend; npm run dev
 
 ## API Endpoints
 - Node
-  - GET /api/data/summary → live data cards and chart (AlphaVantage + FRED)
+  - GET /api/data/summary → live data cards and chart (SPY via AlphaVantage, BTC via yfinance through Python, macros via FRED)
   - POST /api/analyze → proxies to Python /analyze
   - GET /api/forecast → proxies to Python /forecast
   - POST /api/report → generates PDF (download)
