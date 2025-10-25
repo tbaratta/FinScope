@@ -26,7 +26,7 @@ function extractSymbolsFromPayload(body) {
   if (Array.isArray(body?.symbols)) return body.symbols.filter(s => typeof s === 'string')
   if (Array.isArray(body?.positions)) return body.positions.map(p => p?.symbol).filter(Boolean)
   if (body?.portfolio && typeof body.portfolio === 'object') return Object.keys(body.portfolio)
-  return ['SPY']
+  return ['AMD']
 }
 
 async function fetchSeries(symbol) {
