@@ -7,7 +7,7 @@ FinScope is a hackathon-ready, multi-agent financial intelligence dashboard powe
 - Backend: Node.js (Express) + Python (FastAPI microservice)
 - Database: MongoDB Atlas (optional)
 - AI/Agents: Google ADK (Gemini 2.5 Flash) configs
-- APIs: Yahoo Finance, AlphaVantage, NewsAPI, FRED (stubs in MVP)
+- APIs: Yahoo Finance, AlphaVantage, NewsAPI, FRED (live data; requires API keys)
 - Auth: Supabase
 - Reports: PDF via Node (pdfkit)
 
@@ -70,11 +70,11 @@ cd finscope/frontend; npm run dev
 
 ## API Endpoints
 - Node
-  - GET /api/data/summary → mocked data cards and chart
+  - GET /api/data/summary → live data cards and chart (AlphaVantage + FRED)
   - POST /api/analyze → proxies to Python /analyze
   - GET /api/forecast → proxies to Python /forecast
   - POST /api/report → generates PDF (download)
-  - POST /api/analyze/chat → agent chat (stub)
+  - POST /api/analyze/chat → Gemini-powered chat (requires ADK_API_KEY)
 - Python
   - POST /analyze → z-score + IsolationForest anomalies
   - GET /forecast → linear regression baseline forecast
@@ -84,7 +84,8 @@ cd finscope/frontend; npm run dev
 Configs under `agents/` reference sub-agents and tools. Wire them with Google ADK runner/SDK as needed at runtime. Mission Control delegates to DataAgent, AnalyzerAgent, ForecasterAgent, InvestAgent, TeacherAgent, NotifierAgent, SandboxAgent.
 
 ## Notes
-- MVP stubs external data (replace with real API calls in `backend/node/routes/data.js`).
+- No demo mode: Services fail fast on missing keys.
+- Required keys in `.env`: FRED_API_KEY, ALPHAVANTAGE_API_KEY, ADK_API_KEY, plus VITE_SUPABASE_URL/KEY (frontend).
 - Supabase OAuth provider is set to GitHub by default. Enable in your Supabase project.
 - PDF is generated server-side for consistency.
 

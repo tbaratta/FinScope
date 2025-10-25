@@ -2,13 +2,16 @@ import express from 'express'
 import cors from 'cors'
 import morgan from 'morgan'
 import dotenv from 'dotenv'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import { MongoClient } from 'mongodb'
 import dataRoutes from './routes/data.js'
 import analyzeRoutes from './routes/analyze.js'
 import forecastRoutes from './routes/forecast.js'
 import reportRoutes from './routes/report.js'
 
-dotenv.config({ path: new URL('../..', import.meta.url).pathname + '/.env' })
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+dotenv.config({ path: path.resolve(__dirname, '../../.env') })
 
 const app = express()
 app.use(cors())
@@ -25,6 +28,28 @@ if (MONGO_URI) {
     console.log('MongoDB connected')
   }).catch(err => console.error('Mongo connection failed', err.message))
 }
+
+// Required configuration validation (no demo mode)
+const requiredEnv = [
+  'ALPHAVANTAGE_API_KEY',
+  'FRED_API_KEY',
+  'ADK_API_KEY',
+]
+const missing = requiredEnv.filter(k => !process.env[k])
+if (missing.length) {
+  console.error('\n[FinScope] Missing required environment variables (no demo mode):')
+  missing.forEach(k => console.error('  -', k))
+  console.error('Set these in finscope/.env or your deployment environment and restart.')
+  process.exit(1)
+}
+
+app.get('/api/health/config', (_req, res) => {
+  res.json({
+    ok: true,
+    required: requiredEnv,
+    missing: [],
+  })
+})
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }))
 
