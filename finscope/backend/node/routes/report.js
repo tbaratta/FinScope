@@ -3,7 +3,6 @@ import PDFDocument from 'pdfkit'
 import axios from 'axios'
 
 const router = Router()
-const PY_URL = process.env.PYTHON_SERVICE_URL || 'http://py-api:8000'
 
 router.post('/', async (req, res) => {
   try {
@@ -11,12 +10,16 @@ router.post('/', async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf')
     res.setHeader('Content-Disposition', 'attachment; filename="finscope-report.pdf"')
 
-    // Get agent report with news analysis
-    const agentReport = await axios.post(`${PY_URL}/agents/report`, {
-      symbols: req.body?.symbols || ['SPY'],
-      includeNews: true
-    }).then(r => r.data?.report || {})
-    .catch(err => ({ error: 'Agent analysis failed', detail: err.message }))
+    // Run agent pipeline (Node route) to gather data
+    const symbols = Array.isArray(req.body?.symbols) ? req.body.symbols : []
+    let agentResponse
+    try {
+      const { data } = await axios.post('http://localhost:4000/api/agents/report', symbols.length ? { symbols } : {})
+      agentResponse = data
+    } catch (e) {
+      agentResponse = { error: 'Agent pipeline failed', detail: e?.message }
+    }
+    const agentReport = agentResponse?.report || null
 
     const doc = new PDFDocument({ size: 'LETTER', margin: 50 })
     doc.pipe(res)
@@ -26,43 +29,42 @@ router.post('/', async (req, res) => {
     doc.moveDown()
     doc.fontSize(12).fillColor('#555').text(`Generated: ${new Date().toLocaleString()}`)
 
-    doc.moveDown()
-    doc.fillColor('#000').fontSize(14).text('Market Summary:')
-    
-    if (agentReport.error) {
-      doc.fontSize(12).fillColor('#FF0000').text(agentReport.error)
-      if (agentReport.detail) doc.text(agentReport.detail)
-    } else {
-      // Market Data Section
-      doc.fontSize(12).fillColor('#333')
-      if (agentReport.market_data_keys?.length) {
-        doc.text(`Analyzed symbols: ${agentReport.market_data_keys.join(', ')}`)
-      }
-
-      // News Analysis Section
+    // Summary / Explanation
+    if (agentReport?.explanation) {
       doc.moveDown()
-      doc.fillColor('#000').fontSize(14).text('Latest News & Analysis:')
+      doc.fillColor('#000').fontSize(14).text('Summary')
+      doc.fontSize(12).fillColor('#333').text(agentReport.explanation, { align: 'left' })
+    }
+
+    // Key indicators
+    const macro = agentReport?.macro || {}
+    const overview = agentReport?.asset_overview || {}
+    const rows = []
+    if (macro.ten_year_yield_pct != null) rows.push(['10Y Yield', `${Number(macro.ten_year_yield_pct).toFixed(2)}%`])
+    if (macro.cpi_yoy_pct != null) rows.push(['CPI YoY', `${Number(macro.cpi_yoy_pct).toFixed(2)}%`])
+    if (macro.unemployment_rate_pct != null) rows.push(['Unemployment', `${Number(macro.unemployment_rate_pct).toFixed(2)}%`])
+    for (const sym of Object.keys(overview)) {
+      const o = overview[sym]
+      if (o?.last != null && o?.changePct != null) rows.push([`${sym} (last)`, `${o.last.toFixed(2)} (${o.changePct.toFixed(2)}%)`])
+    }
+    if (rows.length) {
+      doc.moveDown()
+      doc.fillColor('#000').fontSize(14).text('Key Indicators')
+      doc.moveDown(0.5)
+      doc.fontSize(12).fillColor('#222')
+      rows.forEach(([k, v]) => doc.text(`${k}: ${v}`))
+    }
+
+    // Headlines
+    const headlines = Array.isArray(agentReport?.headlines) ? agentReport.headlines.slice(0, 8) : []
+    if (headlines.length) {
+      doc.moveDown()
+      doc.fillColor('#000').fontSize(14).text('Top Headlines')
       doc.fontSize(12).fillColor('#333')
-      
-      if (agentReport.news_analysis) {
-        const { summary, sentiment, key_points } = agentReport.news_analysis
-        if (summary) {
-          doc.text('Summary:', { underline: true })
-          doc.text(summary)
-          doc.moveDown(0.5)
-        }
-        if (key_points?.length) {
-          doc.text('Key Points:', { underline: true })
-          key_points.forEach(point => doc.text(`• ${point}`))
-          doc.moveDown(0.5)
-        }
-        if (sentiment) {
-          doc.text('Market Sentiment:', { underline: true })
-          doc.text(sentiment)
-        }
-      } else {
-        doc.text('No news analysis available for the specified symbols.')
-      }
+      headlines.forEach(h => {
+        const line = `• ${h.title}${h.source ? ` — ${h.source}` : ''}`
+        doc.text(line)
+      })
     }
 
     doc.end()
