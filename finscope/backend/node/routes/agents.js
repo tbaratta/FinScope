@@ -44,19 +44,33 @@ function extractPositionsFromPayload(body) {
   return { positions: null, symbols: ['SPY'] }
 }
 
-async function fetchSeries(symbol) {
-  const { data } = await axios.get(`${PY_URL}/market`, { params: { symbol, period: '1mo', interval: '1d' }, timeout: 15000 })
+async function fetchSeries(symbol, period = '6mo', interval = '1d') {
+  const { data } = await axios.get(`${PY_URL}/market`, { params: { symbol, period, interval }, timeout: 20000 })
   if (data?.error) throw new Error(data.error)
   return data
 }
 
-async function runTeacher(summaryInput) {
+async function runTeacher(summaryInput, teacherConfig) {
   const apiKey = process.env.ADK_API_KEY || process.env.GOOGLE_API_KEY
   if (!apiKey) return { explanation: 'Gemini API key not configured.' }
   const genAI = new GoogleGenerativeAI(apiKey)
-  const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+  const cfgModel = teacherConfig?.model && typeof teacherConfig.model === 'string' ? teacherConfig.model : null
+  const modelName = cfgModel || process.env.GEMINI_MODEL || 'gemini-2.5-flash'
   const model = genAI.getGenerativeModel({ model: modelName })
-  const prompt = `You are FinScope Teacher. Explain these analytics in plain English with clear next steps.\n\n${JSON.stringify(summaryInput, null, 2)}`
+  const teacherInstr = typeof teacherConfig?.instruction === 'string' ? teacherConfig.instruction : ''
+  const system = [
+    'You are FinScope Mission Control Teacher. Provide concise, actionable, educational insights.',
+    'Do NOT provide personalized financial advice. Include disclaimers where appropriate.',
+    teacherInstr,
+    'Structure your response into clear sections:',
+    '- Market Overview',
+    '- Macro Watch (explain 10Y, CPI YoY, Unemployment if present)',
+    '- Headlines Snapshot (cite sources briefly)',
+    '- Technicals Snapshot (volatility, SMA trends, 6m high/low proximity)',
+    '- Educational Recommendations (3-5 items) with rationale and risk notes',
+    '- Next Steps (3 bullets)'
+  ].filter(Boolean).join('\n')
+  const prompt = `${system}\n\nContext JSON:\n${JSON.stringify(summaryInput, null, 2)}`
   try {
     const result = await model.generateContent(prompt)
     const reply = result?.response?.text() || ''
@@ -126,7 +140,7 @@ router.post('/report', async (req, res) => {
     const failures = []
     for (const sym of symbols) {
       try {
-        const s = await fetchSeries(sym)
+        const s = await fetchSeries(sym, '6mo', '1d')
         seriesMap[sym] = s
         for (const d of (s.labels || [])) labelsRef.add(d)
       } catch (e) {
@@ -185,12 +199,13 @@ router.post('/report', async (req, res) => {
     }
     run.steps.push({ name: analyzerAgent?.name || 'AnalyzerAgent', type: 'analyze', status: analysis?.error ? 'error' : 'ok', output: analysis })
 
-    // Step 3: Macro (FRED) and News
-    const [dgs10, cpi, unrate, headlines] = await Promise.all([
+    // Step 3: Macro (FRED), News, and VIX
+    const [dgs10, cpi, unrate, headlines, vix] = await Promise.all([
       fetchFredSeries('DGS10'),
       fetchFredSeries('CPIAUCSL'),
       fetchFredSeries('UNRATE'),
       fetchNewsHeadlines(),
+      fetchSeries('^VIX', '6mo', '1d').catch(() => null),
     ])
     let cpiYoY = null
     if (cpi?.obs?.length >= 13) {
@@ -202,13 +217,38 @@ router.post('/report', async (req, res) => {
       ten_year_yield_pct: dgs10 ? Number(dgs10.last) : null,
       cpi_yoy_pct: cpiYoY,
       unemployment_rate_pct: unrate ? Number(unrate.last) : null,
+      vix_last: vix?.values?.length ? Number(vix.values[vix.values.length - 1]) : null,
     }
     run.steps.push({ name: 'MacroNews', type: 'context', status: 'ok', output: { macro, headlinesCount: headlines.length } })
 
-    // Compute per-asset overview (last/prev/change)
-    const asset_overview = {}
+    // Step 3.2: Personal finances (Plaid transactions summary via Python DB)
+    let personal_finance = null
+    try {
+      const { data: pf } = await axios.get(`${PY_URL}/bank/summary`, { params: { days: 30 }, timeout: 10000 })
+      if (!pf?.error) personal_finance = pf
+    } catch (_) {}
+    run.steps.push({ name: 'BankSummary', type: 'context', status: personal_finance ? 'ok' : 'empty' })
+
+    // Step 3.5: Forecasts (call Python /forecast for each symbol)
+    const forecast = {}
     for (const sym of okSymbols) {
-      const vals = seriesMap[sym]?.values || []
+      try {
+        const r = await axios.get(`${PY_URL}/forecast`, { params: { symbol: sym, horizon: 14 }, timeout: 15000 })
+        const f = r.data
+        if (!f?.error && Array.isArray(f?.forecast)) {
+          forecast[sym] = f
+        }
+      } catch (_) {
+        // ignore individual forecast failures
+      }
+    }
+    run.steps.push({ name: 'ForecasterAgent', type: 'forecast', status: Object.keys(forecast).length ? 'ok' : 'empty', output: Object.keys(forecast) })
+
+    // Compute per-asset overview and technicals
+    const asset_overview = {}
+    const technicals = {}
+    for (const sym of okSymbols) {
+      const vals = (seriesMap[sym]?.values || []).map(Number).filter(v => Number.isFinite(v))
       const n = vals.length
       if (n >= 2) {
         const last = Number(vals[n - 1])
@@ -216,11 +256,66 @@ router.post('/report', async (req, res) => {
         const changePct = prev ? ((last - prev) / prev) * 100 : null
         asset_overview[sym] = { last, prev, changePct }
       }
+      // Technicals: daily returns, 20D volatility, SMA(5/20), 6m high/low proximity
+      if (n >= 20) {
+        const rets = []
+        for (let i = 1; i < n; i++) {
+          const r = vals[i - 1] ? (vals[i] - vals[i - 1]) / vals[i - 1] : 0
+          if (Number.isFinite(r)) rets.push(r)
+        }
+        const last20 = rets.slice(-20)
+        const vol20 = last20.length ? Math.sqrt(last20.reduce((a, b) => a + (b * b), 0) / last20.length) * 100 : null
+        const sma = (arr, w) => {
+          if (arr.length < w) return null
+          let s = 0
+          for (let i = arr.length - w; i < arr.length; i++) s += arr[i]
+          return s / w
+        }
+        const sma5 = sma(vals, 5)
+        const sma20 = sma(vals, 20)
+        const hi = Math.max(...vals)
+        const lo = Math.min(...vals)
+        const last = vals[n - 1]
+        const toHighPct = ((hi - last) / hi) * 100
+        const toLowPct = ((last - lo) / lo) * 100
+        technicals[sym] = {
+          vol20_pct: vol20,
+          sma5,
+          sma20,
+          sma_trend: (sma5 != null && sma20 != null) ? (sma5 > sma20 ? 'bullish' : 'bearish') : null,
+          dist_to_6m_high_pct: Number.isFinite(toHighPct) ? toHighPct : null,
+          dist_to_6m_low_pct: Number.isFinite(toLowPct) ? toLowPct : null,
+        }
+      }
     }
 
-    // Step 4: Teacher (LLM explanation across market, macro, news)
-    const teacherOut = await runTeacher({ symbols: okSymbols, asset_overview, macro, analysis, headlines })
+    // Step 4: InvestAgent-lite (via Python /invest)
+    let invest = null
+    try {
+      const invPositions = (Array.isArray(positions) && positions.length)
+        ? positions
+        : okSymbols.map(s => ({ symbol: s, weight: 1 / okSymbols.length }))
+      const r = await axios.post(`${PY_URL}/invest`, { positions: invPositions, macro }, { timeout: 15000 })
+      invest = r.data
+    } catch (e) {
+      invest = { error: e?.message || 'invest failed' }
+    }
+    run.steps.push({ name: 'InvestAgent', type: 'invest', status: invest?.error ? 'error' : 'ok', output: invest })
+
+    // Step 5: Teacher (LLM explanation across market, macro, news, technicals, forecasts, invest)
+    const teacherOut = await runTeacher({ symbols: okSymbols, asset_overview, macro, headlines, technicals, analysis, forecast, personal_finance }, teacherAgent)
     run.steps.push({ name: teacherAgent?.name || 'TeacherAgent', type: 'teach', status: 'ok', output: teacherOut })
+
+    // Build compact timeseries for charts (last ~120 points)
+    const series = {}
+    for (const sym of okSymbols) {
+      const s = seriesMap[sym] || {}
+      const L = Math.max(0, (s.labels || []).length - 120)
+      series[sym] = {
+        labels: (s.labels || []).slice(L),
+        values: (s.values || []).slice(L)
+      }
+    }
 
     const report = {
       run_id: Date.now().toString(36),
@@ -229,10 +324,14 @@ router.post('/report', async (req, res) => {
       input_weights: weightMap || null,
       market_data_keys: Object.keys(seriesMap),
       market_data_samples: Object.fromEntries(Object.entries(seriesMap).map(([k, v]) => [k, (v.values || []).slice(0, 5)])),
+      series,
+      technicals,
       asset_overview,
       macro,
       headlines,
       analysis,
+      forecast,
+      invest,
       explanation: teacherOut?.explanation || '',
     }
     return res.json({ report, steps: run.steps })

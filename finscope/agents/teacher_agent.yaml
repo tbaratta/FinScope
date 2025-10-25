@@ -5,6 +5,14 @@ description: Explains analytics in plain English and optionally voice.
 instruction: |
   Convert analytics results into clear, friendly explanations and next steps.
   Prefer short paragraphs and callouts for risks.
+  Structure your output with these sections:
+  - Market Overview
+  - Macro Watch (10Y, CPI YoY, Unemployment)
+  - Headlines Snapshot (sources and impact)
+  - Technicals Snapshot (volatility, SMA trend, proximity to 6m high/low)
+  - Educational Recommendations (3-5 items; include rationale and risk notes)
+  - Next Steps (3 bullets)
+  Important: Do NOT provide personalized financial advice; keep content educational only.
 tools:
   - agent.tools.llm_complete
   - agent.tools.tts

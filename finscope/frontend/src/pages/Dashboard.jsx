@@ -2,12 +2,15 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../utils/api'
 import DataCards from '../components/DataCards'
 import AgentChat from '../components/AgentChat'
+import ReportView from '../components/ReportView'
+import PlaidConnect from '../components/PlaidConnect'
 
 export default function Dashboard() {
   const [cards, setCards] = useState([])
   const [agentReport, setAgentReport] = useState(null)
   const [symbolsText, setSymbolsText] = useState('SPY, QQQ, DIA')
   const [agentLoading, setAgentLoading] = useState(false)
+  const [error, setError] = useState('')
 
   const computeChart = useCallback(async () => {
     try {
@@ -25,13 +28,17 @@ export default function Dashboard() {
       .map(s => s.trim().toUpperCase())
       .filter(Boolean)
       .slice(0, 10)
-    const res = await api.post('/api/report', { title: 'Daily Summary', symbols }, { responseType: 'blob' })
-    const url = window.URL.createObjectURL(new Blob([res.data]))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'finscope-report.pdf'
-    a.click()
-    URL.revokeObjectURL(url)
+    setError('')
+    setAgentLoading(true)
+    try {
+      const payload = symbols.length ? { symbols } : { symbols: ['SPY'] }
+      const { data } = await api.post('/api/agents/report', payload)
+      setAgentReport(data || null)
+    } catch (err) {
+      setError(err?.message || 'Failed to generate report')
+    } finally {
+      setAgentLoading(false)
+    }
   }
 
   const runAgents = async () => {
@@ -70,64 +77,16 @@ export default function Dashboard() {
             />
           </div>
           <div className="flex gap-2">
-            <button onClick={generateReport} className="px-3 py-2 rounded bg-primary">Generate Daily Report (PDF)</button>
-            <button onClick={runAgents} disabled={agentLoading} className={`px-3 py-2 rounded ${agentLoading ? 'bg-slate-700 cursor-not-allowed' : 'bg-accent'}`}>
-              {agentLoading ? 'Running…' : 'Run Mission Control (Agents)'}
-            </button>
+            <button onClick={generateReport} className="px-3 py-2 rounded bg-primary disabled:opacity-50" disabled={agentLoading}>{agentLoading ? 'Generating…' : 'Generate Report'}</button>
+            <a href="#" onClick={async (e) => { e.preventDefault(); try { const symbols = symbolsText.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean).slice(0,10); const { data } = await api.post('/api/report', { title: 'FinScope Report', symbols }, { responseType: 'blob' }); const url = window.URL.createObjectURL(new Blob([data], { type: 'application/pdf' })); const a = document.createElement('a'); a.href = url; a.download = 'finscope-report.pdf'; a.click(); setTimeout(()=>{ URL.revokeObjectURL(url) }, 1500) } catch {} }} className="px-3 py-2 rounded bg-slate-800">Download PDF</a>
           </div>
+          {error && <div className="text-xs text-red-400 mt-2">{error}</div>}
         </div>
-        {agentReport && (
-          <div className="rounded border border-slate-800 bg-slate-900 p-4">
-            <div className="font-semibold mb-2">Agent Report</div>
-            {agentReport.error ? (
-              <div className="text-red-400">{agentReport.error}: {agentReport.detail}</div>
-            ) : (
-              (() => {
-                const rep = agentReport.report || agentReport
-                const steps = agentReport.steps || []
-                const dataStep = steps.find(s => s.type === 'data')
-                const partialFails = Array.isArray(dataStep?.failures) && dataStep.failures.length
-                return (
-                  <div className="text-sm text-slate-300 space-y-3">
-                    <div className="space-y-1">
-                      <div><span className="text-slate-400">Run ID:</span> {rep.run_id}</div>
-                      <div><span className="text-slate-400">Generated:</span> {rep.generated_at}</div>
-                      <div><span className="text-slate-400">Symbols:</span> {(rep.input_symbols || []).join(', ')}</div>
-                      <div><span className="text-slate-400">Samples:</span> {(rep.market_data_keys || []).join(', ')}</div>
-                      {partialFails ? (
-                        <div className="text-amber-400">Skipped symbols: {dataStep.failures.map(f => f.symbol).join(', ')}</div>
-                      ) : null}
-                    </div>
-                    {rep.analysis && (
-                      <div>
-                        <div className="font-semibold mb-1">Analysis</div>
-                        <div className="space-y-1">
-                          {Number.isFinite(rep.analysis.z_score_last) && (
-                            <div><span className="text-slate-400">Z-score (last):</span> {Number(rep.analysis.z_score_last).toFixed(3)}</div>
-                          )}
-                          {Array.isArray(rep.analysis.insights) && rep.analysis.insights.length > 0 && (
-                            <ul className="list-disc list-inside text-slate-200">
-                              {rep.analysis.insights.map((it, idx) => (<li key={idx}>{it}</li>))}
-                            </ul>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    {rep.explanation && (
-                      <div>
-                        <div className="font-semibold mb-1">LLM Explanation</div>
-                        <div className="whitespace-pre-wrap text-slate-200">{rep.explanation}</div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })()
-            )}
-          </div>
-        )}
+        {agentReport && <ReportView report={agentReport} />}
       </div>
       <div className="lg:col-span-1 space-y-4">
         <AgentChat />
+        <PlaidConnect />
       </div>
     </div>
   )

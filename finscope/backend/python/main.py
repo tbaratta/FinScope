@@ -9,9 +9,15 @@ from typing import List, Optional
 import yfinance as yf
 
 from agents.orchestrator import generate_report
+from db import init_db, insert_timeseries, query_timeseries, upsert_transaction, get_conn
+from datetime import datetime, timezone
 
 # Create FastAPI app instance first
 app = FastAPI(title="FinScope Python Service")
+
+@app.on_event("startup")
+async def _startup():
+    init_db()
 
 @app.post("/report")
 async def report(payload: dict = Body(...)):
@@ -177,5 +183,153 @@ async def market(
         return {"symbol": symbol, "labels": labels, "values": values, "last": last}
     except Exception as e:
         return {"error": str(e)}
+
+# --- InvestAgent-lite: simple rebalance suggestion based on volatility and macro ---
+class InvestInput(BaseModel):
+    positions: List[dict]
+    macro: Optional[dict] = None
+
+@app.post("/invest")
+async def invest(payload: InvestInput):
+    try:
+        # compute class exposures (very simplified mapping)
+        positions = payload.positions or []
+        weights = {str(p.get('symbol')).upper(): float(p.get('weight')) for p in positions if p.get('symbol') and p.get('weight')}
+        # fetch recent vol for select ETFs as proxies
+        proxies = {}
+        for sym in ['BND', 'IEF', 'SHY', 'SPY', 'QQQ', 'BTC-USD']:
+            hist = yf.Ticker(sym).history(period='3mo', interval='1d', auto_adjust=False)
+            if hist is None or hist.empty:
+                continue
+            r = hist['Close'].pct_change().dropna()
+            proxies[sym] = {
+                'mean': float(r.mean()),
+                'vol': float(r.std())
+            }
+        macro = payload.macro or {}
+        vix = float(macro.get('vix_last')) if macro.get('vix_last') is not None else None
+        cpi = float(macro.get('cpi_yoy_pct')) if macro.get('cpi_yoy_pct') is not None else None
+
+        # heuristic: if crypto present and its vol >> bonds vol, suggest small rebalance to bonds
+        signal = None
+        rationale = []
+        confidence = 0.5
+        crypto_weight = sum(w for s, w in weights.items() if 'BTC' in s or 'ETH' in s or s in ['MARA','RIOT'])
+        bond_vol = proxies.get('BND', {}).get('vol') or proxies.get('IEF', {}).get('vol') or 0.005
+        btc_vol = proxies.get('BTC-USD', {}).get('vol')
+        if crypto_weight and btc_vol and bond_vol and btc_vol > bond_vol * 2.0:
+            signal = f"rebalance_{min(5, int(round(crypto_weight*100)))}pct_from_crypto_to_bonds"
+            rationale.append('Crypto volatility materially exceeds bonds over the last 3 months.')
+            confidence = 0.6
+        if vix and vix > 25:
+            rationale.append('VIX is elevated; adding defensive exposure can reduce downside risk.')
+            confidence = max(confidence, 0.65)
+        if cpi and cpi < 3.0:
+            rationale.append('Cooling CPI favors duration slightly in the near term.')
+        if not signal:
+            signal = 'hold_review_next_week'
+            rationale.append('No strong imbalance detected; maintain allocations and review weekly.')
+            confidence = 0.5
+        return {
+            'portfolio': [{'ticker': s, 'weight': w} for s, w in weights.items()],
+            'risk_exposure': { 'crypto': crypto_weight },
+            'signal': signal,
+            'rationale': ' '.join(rationale),
+            'confidence': confidence
+        }
+    except Exception as e:
+        return { 'error': str(e) }
+
+# --- Timeseries storage endpoints ---
+class TSRow(BaseModel):
+    source: str
+    metric: str
+    timestamp: str
+    value: float
+    ingest_ts: Optional[str] = None
+    meta: Optional[dict] = None
+
+@app.post("/timeseries/ingest")
+async def ts_ingest(rows: List[TSRow]):
+    now_iso = datetime.now(timezone.utc).isoformat()
+    payload = []
+    for r in rows:
+        payload.append({
+            "source": r.source,
+            "metric": r.metric,
+            "timestamp": r.timestamp,
+            "value": r.value,
+            "ingest_ts": r.ingest_ts or now_iso,
+            "meta": r.meta or {},
+        })
+    insert_timeseries(payload)
+    return {"ingested": len(payload)}
+
+@app.get("/timeseries/query")
+async def ts_query(metric: str, start: Optional[str] = None, end: Optional[str] = None):
+    rows = query_timeseries(metric, start, end)
+    labels = [r["timestamp"] for r in rows]
+    values = [r["value"] for r in rows]
+    return {"metric": metric, "labels": labels, "values": values}
+
+# --- Transactions storage (for Plaid) ---
+@app.post("/bank/transactions")
+async def bank_transactions(payload: dict = Body(...)):
+    txns = payload.get("transactions")
+    if not isinstance(txns, list):
+        return {"error": "transactions must be a list"}
+    for t in txns:
+        try:
+            upsert_transaction(t)
+        except Exception:
+            continue
+    return {"stored": len(txns)}
+
+# --- Bank summary aggregates (last N days)
+@app.get("/bank/summary")
+async def bank_summary(days: int = 30):
+    try:
+        # derive date cutoff
+        from datetime import date, timedelta
+        cutoff = (date.today() - timedelta(days=max(1, days))).isoformat()
+        by_category = {}
+        by_merchant = {}
+        total = 0.0
+        with get_conn() as c:
+            # Only consider positive amounts (spend)
+            cur = c.execute("SELECT date, name, amount, category FROM transactions WHERE date>=? AND amount>0", (cutoff,))
+            for d, name, amount, category in cur.fetchall():
+                amt = float(amount or 0)
+                total += amt
+                cat = None
+                if category:
+                    # category is a comma-separated string; use the first element as top-level
+                    cat = str(category).split(',')[0].strip()
+                cat = cat or 'Uncategorized'
+                by_category.setdefault(cat, {'count': 0, 'total': 0.0})
+                by_category[cat]['count'] += 1
+                by_category[cat]['total'] += amt
+                nm = name or 'Unknown'
+                by_merchant.setdefault(nm, {'count': 0, 'total': 0.0})
+                by_merchant[nm]['count'] += 1
+                by_merchant[nm]['total'] += amt
+        # format top lists
+        top_categories = sorted([
+            {'category': k, 'count': v['count'], 'total': round(v['total'], 2)} for k, v in by_category.items()
+        ], key=lambda x: x['total'], reverse=True)[:8]
+        top_merchants = sorted([
+            {'merchant': k, 'count': v['count'], 'total': round(v['total'], 2)} for k, v in by_merchant.items()
+        ], key=lambda x: x['total'], reverse=True)[:8]
+        # recurring = merchants with >=3 transactions within the window
+        recurring = [m for m in top_merchants if m['count'] >= 3]
+        return {
+            'window_days': days,
+            'total_spend': round(total, 2),
+            'top_categories': top_categories,
+            'top_merchants': top_merchants,
+            'recurring_merchants': recurring,
+        }
+    except Exception as e:
+        return { 'error': str(e) }
     
     
