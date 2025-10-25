@@ -1,9 +1,0 @@
-agent_class: LlmAgent
-model: gemini-2.5-flash
-name: SandboxAgent
-description: Performs what-if simulations and returns impacts on risk/return.
-instruction: |
-  Adjust portfolio weights based on user input and recompute risk/return deltas.
-tools:
-  - agent.tools.run_script
-  - agent.tools.llm_complete

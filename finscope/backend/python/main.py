@@ -8,7 +8,17 @@ from sklearn.linear_model import LinearRegression
 from typing import List, Optional
 import yfinance as yf
 
+from agents.orchestrator import generate_report
+
+# Create FastAPI app instance first
 app = FastAPI(title="FinScope Python Service")
+
+@app.post("/report")
+async def report(payload: dict = Body(...)):
+    """Run all agents and return a unified financial insight report."""
+    portfolio = payload.get("portfolio", {"SPY": [440, 445, 450, 455, 460]})
+    report_text = generate_report(portfolio)
+    return {"report": report_text}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -148,3 +158,5 @@ async def market(
         return {"symbol": symbol, "labels": labels, "values": values, "last": last}
     except Exception as e:
         return {"error": str(e)}
+    
+    

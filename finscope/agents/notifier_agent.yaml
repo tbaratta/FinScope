@@ -1,8 +1,0 @@
-agent_class: LlmAgent
-model: gemini-2.5-flash
-name: NotifierAgent
-description: Sends alerts via UI or email when thresholds are crossed.
-instruction: |
-  When an anomaly or risk threshold triggers, format a short alert with priority and suggested action.
-tools:
-  - agent.tools.llm_complete
