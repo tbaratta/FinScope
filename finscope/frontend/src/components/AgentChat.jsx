@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import axios from 'axios'
+import { api } from '../utils/api'
 
 export default function AgentChat() {
   const [input, setInput] = useState('')
@@ -12,7 +12,7 @@ export default function AgentChat() {
     setMessages((m) => [...m, userMsg])
     setInput('')
     try {
-      const res = await axios.post(`${import.meta.env.VITE_API_BASE_URL}/api/analyze/chat`, { messages: [...messages, userMsg] })
+      const res = await api.post('/api/analyze/chat', { message: input })
       setMessages((m) => [...m, { role: 'assistant', content: res.data.reply || 'No reply' }])
     } catch (err) {
       setMessages((m) => [...m, { role: 'assistant', content: 'Error contacting agent.' }])

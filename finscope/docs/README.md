@@ -1,11 +1,11 @@
 # FinScope: AI Financial Mission Control
 
-FinScope is a hackathon-ready, multi-agent financial intelligence dashboard powered by Google ADK (Gemini 2.5 Flash). It fetches live data, analyzes correlations to a mock personal portfolio, detects anomalies, and explains insights conversationally.
+FinScope is a hackathon-ready, multi-agent financial intelligence dashboard powered by Google ADK (Gemini 2.5 Flash). It fetches live market data, analyzes correlations to your portfolio, detects anomalies, and explains insights conversationally.
 
 ## Tech Stack
 - Frontend: React + Vite + TailwindCSS + Chart.js
 - Backend: Node.js (Express) + Python (FastAPI microservice)
-- Database: MongoDB Atlas (optional)
+- Database: MongoDB Atlas (for user portfolios)
 - AI/Agents: Google ADK (Gemini 2.5 Flash) configs
 - APIs: AlphaVantage (equities), yfinance via Python (crypto/others), NewsAPI, FRED (live data; FRED/AlphaVantage keys required)
 - Auth: Supabase
@@ -71,22 +71,24 @@ cd finscope/frontend; npm run dev
 ## API Endpoints
 - Node
   - GET /api/data/summary → live data cards and chart (SPY via AlphaVantage, BTC via yfinance through Python, macros via FRED)
+  - GET /api/data/portfolio → returns the authenticated user's portfolio (MongoDB)
+  - PUT /api/data/portfolio → upserts the authenticated user's portfolio (MongoDB)
   - POST /api/analyze → proxies to Python /analyze
   - GET /api/forecast → proxies to Python /forecast
   - POST /api/report → generates PDF (download)
   - POST /api/analyze/chat → Gemini-powered chat (requires ADK_API_KEY)
 - Python
-  - POST /analyze → z-score + IsolationForest anomalies
-  - GET /forecast → linear regression baseline forecast
-  - POST /simulate → what-if impact stub
+  - POST /analyze → z-score + IsolationForest anomalies (uses real market data fallback if series not provided)
+  - GET /forecast → linear regression forecast from actual market history (yfinance)
+  - POST /simulate → sector shift impact using recent returns/volatility of sector ETFs
 
 ## Agents (ADK Configs)
 Configs under `agents/` reference sub-agents and tools. Wire them with Google ADK runner/SDK as needed at runtime. Mission Control delegates to DataAgent, AnalyzerAgent, ForecasterAgent, InvestAgent, TeacherAgent, NotifierAgent, SandboxAgent.
 
 ## Notes
 - No demo mode: Services fail fast on missing keys.
-- Required keys in `.env`: FRED_API_KEY, ALPHAVANTAGE_API_KEY, ADK_API_KEY, plus VITE_SUPABASE_URL/KEY (frontend).
-- Supabase OAuth provider is set to GitHub by default. Enable in your Supabase project.
+- Required keys in `.env`: FRED_API_KEY, ALPHAVANTAGE_API_KEY, ADK_API_KEY, plus VITE_SUPABASE_URL/KEY (frontend). Set MONGO_URI to enable portfolio persistence.
+- Auth defaults to passwordless email magic link. To use OAuth (e.g., GitHub/Google), enable the provider in Supabase and set `VITE_AUTH_PROVIDER`.
 - PDF is generated server-side for consistency.
 
 ## Deployment

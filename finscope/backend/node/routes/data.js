@@ -78,21 +78,61 @@ router.get('/summary', async (_req, res) => {
   }
 })
 
-// Sample portfolio endpoint (mock)
-router.get('/portfolio', async (_req, res) => {
+// Supabase auth helper: validate bearer token and return user
+async function getSupabaseUser(req) {
+  const auth = req.headers['authorization'] || ''
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null
+  if (!token) return null
+  const base = process.env.SUPABASE_URL
+  if (!base) return null
   try {
-    res.json({
-      owner: 'demo@user',
-      positions: [
-        { symbol: 'AAPL', weight: 0.25 },
-        { symbol: 'MSFT', weight: 0.25 },
-        { symbol: 'VOO', weight: 0.30 },
-        { symbol: 'XLE', weight: 0.10 },
-        { symbol: 'BTC-USD', weight: 0.10 }
-      ]
+    const { data } = await axios.get(`${base}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 10000,
+    })
+    return data || null
+  } catch (_) {
+    return null
+  }
+}
+
+// Real portfolio endpoints backed by MongoDB, per authenticated user
+router.get('/portfolio', async (req, res) => {
+  try {
+    const user = await getSupabaseUser(req)
+    if (!user) return res.status(401).json({ error: 'Unauthorized' })
+    const db = req.app.locals.db
+    if (!db) return res.status(500).json({ error: 'Database not configured (set MONGO_URI)' })
+    const doc = await db.collection('portfolios').findOne({ user_id: user.id })
+    return res.json({
+      owner: user.email,
+      positions: doc?.positions || []
     })
   } catch (err) {
-    res.status(500).json({ error: 'Failed to load portfolio' })
+    res.status(500).json({ error: 'Failed to load portfolio', detail: err?.message })
+  }
+})
+
+router.put('/portfolio', async (req, res) => {
+  try {
+    const user = await getSupabaseUser(req)
+    if (!user) return res.status(401).json({ error: 'Unauthorized' })
+    const db = req.app.locals.db
+    if (!db) return res.status(500).json({ error: 'Database not configured (set MONGO_URI)' })
+    const positions = Array.isArray(req.body?.positions) ? req.body.positions : []
+    // Basic validation: symbol string and weight number
+    const clean = positions
+      .filter(p => p && typeof p.symbol === 'string' && isFinite(p.weight))
+      .map(p => ({ symbol: String(p.symbol).toUpperCase().trim(), weight: Number(p.weight) }))
+    await db.collection('portfolios').updateOne(
+      { user_id: user.id },
+      { $set: { user_id: user.id, email: user.email, positions: clean, updated_at: new Date() } },
+      { upsert: true }
+    )
+    const doc = await db.collection('portfolios').findOne({ user_id: user.id })
+    return res.json({ owner: doc.email, positions: doc.positions })
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save portfolio', detail: err?.message })
   }
 })
 

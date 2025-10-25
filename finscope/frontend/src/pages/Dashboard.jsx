@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import axios from 'axios'
+import { api } from '../utils/api'
 import DataCards from '../components/DataCards'
 import ChartPanel from '../components/ChartPanel'
 import AgentChat from '../components/AgentChat'
@@ -11,7 +11,7 @@ export default function Dashboard() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await axios.get(`${import.meta.env.VITE_API_BASE_URL}/api/data/summary`)
+        const res = await api.get('/api/data/summary')
         setCards(res.data.cards || [])
         setChart(res.data.chart || { labels: [], series: [] })
       } catch (_) {}
@@ -20,7 +20,7 @@ export default function Dashboard() {
   }, [])
 
   const generateReport = async () => {
-    const res = await axios.post(`${import.meta.env.VITE_API_BASE_URL}/api/report`, { title: 'Daily Summary' }, { responseType: 'blob' })
+  const res = await api.post('/api/report', { title: 'Daily Summary' }, { responseType: 'blob' })
     const url = window.URL.createObjectURL(new Blob([res.data]))
     const a = document.createElement('a')
     a.href = url

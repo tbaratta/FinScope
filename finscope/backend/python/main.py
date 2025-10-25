@@ -31,9 +31,16 @@ async def health():
 
 @app.post("/analyze")
 async def analyze(payload: AnalyzeInput = Body(...)):
-    # Simple z-score on portfolio and isolation forest anomalies
+    # Z-score on portfolio and isolation forest anomalies using real data fallback
     try:
-        vals = payload.portfolio.values if payload.portfolio else [100 + i*0.2 for i in range(50)]
+        if payload.portfolio and payload.portfolio.values:
+            vals = payload.portfolio.values
+        else:
+            # Fallback to SPY close values (1mo, 1d) for a real series
+            hist = yf.Ticker("SPY").history(period="1mo", interval="1d", auto_adjust=False)
+            if hist is None or hist.empty:
+                return {"error": "No market data available for analysis"}
+            vals = hist['Close'].astype(float).tolist()
         ser = np.array(vals)
         z = (ser - ser.mean()) / (ser.std() + 1e-9)
         iso = IsolationForest(contamination=0.05, random_state=42)
@@ -56,15 +63,22 @@ async def analyze(payload: AnalyzeInput = Body(...)):
         return {"error": str(e)}
 
 @app.get("/forecast")
-async def forecast(symbol: str = "PORT", horizon: int = 14):
-    # Simple linear regression forecast as baseline
-    n = 60
+async def forecast(symbol: str = "SPY", horizon: int = 14):
+    """Forecast using simple linear regression over recent market closes via yfinance."""
+    # Pull recent history
+    hist = yf.Ticker(symbol).history(period="3mo", interval="1d", auto_adjust=False)
+    if hist is None or hist.empty:
+        return {"error": f"No market data for {symbol}"}
+    y = hist['Close'].astype(float).values
+    n = len(y)
+    if n < 20:
+        return {"error": "Insufficient data for forecast"}
     x = np.arange(n).reshape(-1, 1)
-    y = (100 + 0.2 * np.arange(n) + np.sin(np.arange(n)/5)*2 + np.random.normal(0, 0.5, n)).reshape(-1, 1)
-    lr = LinearRegression().fit(x, y)
-    future_idx = np.arange(n, n+horizon).reshape(-1, 1)
+    y2d = y.reshape(-1, 1)
+    lr = LinearRegression().fit(x, y2d)
+    future_idx = np.arange(n, n + horizon).reshape(-1, 1)
     yhat = lr.predict(future_idx).flatten().tolist()
-    labels = [f"D{i+1}" for i in range(horizon)]
+    labels = [str(idx) for idx in range(1, horizon + 1)]
     return {"symbol": symbol, "labels": labels, "forecast": yhat}
 
 class SimInput(BaseModel):
@@ -74,13 +88,46 @@ class SimInput(BaseModel):
 
 @app.post("/simulate")
 async def simulate(sim: SimInput):
-    # Mocked simulation effect
-    impact = round(sim.shift_pct * 0.1, 2)
-    return {
-        "message": f"Shifted {sim.shift_pct}% from {sim.from_sector} to {sim.to_sector}.",
-        "expected_risk_change_pct": -impact,
-        "expected_return_change_pct": impact
+    """Estimate impact of shifting allocation between sectors using recent returns/volatility of sector ETFs."""
+    sector_etf = {
+        "tech": "XLK",
+        "energy": "XLE",
+        "healthcare": "XLV",
+        "financials": "XLF",
+        "industrials": "XLI",
+        "materials": "XLB",
+        "utilities": "XLU",
+        "real_estate": "XLRE",
+        "consumer_discretionary": "XLY",
+        "consumer_staples": "XLP",
+        "communication": "XLC",
     }
+    src = sector_etf.get(sim.from_sector.lower())
+    dst = sector_etf.get(sim.to_sector.lower())
+    if not src or not dst:
+        return {"error": "Unknown sector. Use keys like tech, energy, healthcare, financials, ..."}
+    try:
+        h_from = yf.Ticker(src).history(period="3mo", interval="1d", auto_adjust=False)
+        h_to = yf.Ticker(dst).history(period="3mo", interval="1d", auto_adjust=False)
+        if h_from.empty or h_to.empty:
+            return {"error": "No data for sector ETFs"}
+        r_from = h_from['Close'].pct_change().dropna()
+        r_to = h_to['Close'].pct_change().dropna()
+        mean_from = float(r_from.mean())
+        mean_to = float(r_to.mean())
+        vol_from = float(r_from.std())
+        vol_to = float(r_to.std())
+        # Approximate portfolio-level delta from shifting 'shift_pct' percentage points
+        w = sim.shift_pct / 100.0
+        expected_return_change_pct = round((mean_to - mean_from) * w * 100.0, 2)
+        expected_risk_change_pct = round((vol_to - vol_from) * w * 100.0, 2)
+        return {
+            "message": f"Shifted {sim.shift_pct}% from {sim.from_sector} ({src}) to {sim.to_sector} ({dst}).",
+            "expected_risk_change_pct": expected_risk_change_pct,
+            "expected_return_change_pct": expected_return_change_pct,
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/market")
 async def market(
