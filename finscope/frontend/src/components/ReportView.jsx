@@ -11,6 +11,7 @@ import {
      Tooltip,
      Legend,
 } from 'chart.js'
+import { useSettings } from '../hooks/useSettings.jsx'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend)
 
@@ -35,11 +36,14 @@ export default function ReportView({ report }) {
      const analysis = rep.analysis || null
      const invest = rep.invest || null
 
+     const { settings } = useSettings()
+
      const mainSym = symbols[0]
      const chartData = useMemo(() => {
           if (!mainSym || !series[mainSym]) return null
           const s = series[mainSym]
-          const L = Math.max(0, (s.labels?.length || 0) - 7)
+          const windowDays = Number(settings?.chartDays || 7)
+          const L = Math.max(0, (s.labels?.length || 0) - windowDays)
           const labels = Array.isArray(s.labels) ? s.labels.slice(L) : []
           const values = Array.isArray(s.values) ? s.values.slice(L) : []
           return {
@@ -48,15 +52,16 @@ export default function ReportView({ report }) {
                     { label: mainSym, data: values, borderColor: '#0ea5e9', backgroundColor: 'rgba(14,165,233,0.25)', pointRadius: 0, tension: 0.25 }
                ]
           }
-     }, [mainSym, series])
+     }, [mainSym, series, settings?.chartDays])
 
-     // Build a chart config for each symbol so we can render multiple charts side-by-side
+     // Build a chart config for each symbol
      const charts = useMemo(() => {
           if (!Array.isArray(symbols) || !symbols.length) return []
+          const windowDays = Number(settings?.chartDays || 7)
           return symbols.map(sym => {
                const s = series?.[sym]
                if (!s || !Array.isArray(s.values) || !Array.isArray(s.labels)) return null
-               const L = Math.max(0, s.labels.length - 7)
+               const L = Math.max(0, s.labels.length - windowDays)
                return {
                     sym,
                     data: {
@@ -67,7 +72,7 @@ export default function ReportView({ report }) {
                     }
                }
           }).filter(Boolean)
-     }, [symbols, series])
+     }, [symbols, series, settings?.chartDays])
 
      return (
           <div className="space-y-6">
@@ -83,19 +88,19 @@ export default function ReportView({ report }) {
                     {Number.isFinite(Number(macro.ten_year_yield_pct)) && <Card title="10Y Yield" value={`${Number(macro.ten_year_yield_pct).toFixed(2)}%`} />}
                     {Number.isFinite(Number(macro.cpi_yoy_pct)) && <Card title="CPI YoY" value={`${Number(macro.cpi_yoy_pct).toFixed(2)}%`} />}
                     {Number.isFinite(Number(macro.unemployment_rate_pct)) && <Card title="Unemployment" value={`${Number(macro.unemployment_rate_pct).toFixed(2)}%`} />}
-                    {Number.isFinite(Number(macro.vix_last)) && <Card title="VIX" value={Number(macro.vix_last).toFixed(2)} />}
                </div>
 
                {charts && charts.length > 0 && (
                     <div className="flex gap-3 overflow-x-auto">
                          {charts.map(c => (
                               <div key={c.sym} className="rounded border border-slate-800 bg-slate-900 p-3 min-w-[240px] w-64">
-                                   <div className="font-semibold mb-2">{c.sym} — last 7 days</div>
+                                   <div className="font-semibold mb-2">{c.sym} — last {settings?.chartDays || 7} days</div>
                                    <div style={{ height: 140 }}>
                                         <Line data={c.data} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 6 } }, y: { ticks: { callback: v => `$${v}` } } } }} />
                                    </div>
                               </div>
                          ))}
+
                     </div>
                )}
 

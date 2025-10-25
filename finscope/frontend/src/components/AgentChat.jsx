@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../utils/api'
@@ -6,6 +6,15 @@ import { api } from '../utils/api'
 export default function AgentChat() {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState([])
+  const listRef = useRef(null)
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    const el = listRef.current
+    if (el) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [messages])
 
   const send = async (e) => {
     e.preventDefault()
@@ -24,7 +33,7 @@ export default function AgentChat() {
   return (
     <div className="rounded border border-slate-800 bg-slate-900 p-4 h-full flex flex-col">
       <div className="font-semibold mb-2">Agent Chat</div>
-      <div className="flex-1 overflow-auto space-y-2">
+      <div ref={listRef} className="flex-1 overflow-auto space-y-2">
         {messages.map((m, i) => (
           <div key={i} className={`${m.role === 'user' ? 'text-primary' : 'text-slate-300'}`}>
             <div className="text-xs uppercase tracking-wide text-slate-400 mb-1">{m.role}</div>
