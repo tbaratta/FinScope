@@ -47,7 +47,7 @@ router.get('/summary', async (_req, res) => {
     // S&P proxy: SPY via AlphaVantage (equities)
     const spy = await fetchAlphaDaily('SPY', ALPHAVANTAGE_API_KEY)
     // BTC via yfinance through Python service
-    const pyUrl = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000'
+  const pyUrl = process.env.PYTHON_SERVICE_URL || 'http://py-api:8000'
     const btc = await fetchYfViaPython(pyUrl, 'BTC-USD', '1mo', '1d')
     // 10Y yield
     const dgs10 = await fetchFredSeries('DGS10', FRED_API_KEY)

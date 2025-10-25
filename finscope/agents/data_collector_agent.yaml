@@ -1,14 +1,21 @@
 agent_class: LlmAgent
 model: gemini-2.5-flash
 name: DataAgent
-description: Fetches market and macroeconomic data (Yahoo, FRED, NewsAPI).
+description: Fetches market data, news, and macroeconomic data (Yahoo, FRED, NewsAPI).
 instruction: |
   Use http_fetch to call public APIs and return normalized JSON.
+  For news analysis:
+  1. Fetch latest news from Yahoo Finance for given symbols
+  2. Analyze sentiment and key points
+  3. Generate a concise daily summary
+  4. Include market impact assessment
   Save summaries to time-series via tsdb_write when available.
 capabilities:
   - fetch
   - transform
   - persist
+  - analyze
+  - summarize
 resources:
   - name: yahoo
     base_url: https://query1.finance.yahoo.com

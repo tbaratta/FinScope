@@ -15,10 +15,29 @@ app = FastAPI(title="FinScope Python Service")
 
 @app.post("/report")
 async def report(payload: dict = Body(...)):
-    """Run all agents and return a unified financial insight report."""
-    portfolio = payload.get("portfolio", {"SPY": [440, 445, 450, 455, 460]})
-    report_text = generate_report(portfolio)
-    return {"report": report_text}
+    """Run all agents and return a unified financial insight report.
+
+    Accepts any of the following shapes:
+    - { "symbols": ["AAPL", "MSFT"] }
+    - { "positions": [{"symbol": "AAPL", "weight": 0.2}, ...] }
+    - { "portfolio": { "AAPL": [prices...], ... } }
+    """
+    symbols = None
+    # Prefer explicit symbols list
+    if isinstance(payload.get("symbols"), list):
+        symbols = [s for s in payload.get("symbols") if isinstance(s, str)]
+    # Or extract from positions list
+    elif isinstance(payload.get("positions"), list):
+        symbols = [str(p.get("symbol")) for p in payload.get("positions") if isinstance(p, dict) and p.get("symbol")]
+    # Or pass through portfolio dict
+    portfolio = payload.get("portfolio") if isinstance(payload.get("portfolio"), dict) else None
+    # If no inputs provided, default to SPY
+    if not symbols and not portfolio:
+        symbols = ["SPY"]
+
+    user_input = symbols if symbols else portfolio
+    report_obj = generate_report(user_input)
+    return {"report": report_obj}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

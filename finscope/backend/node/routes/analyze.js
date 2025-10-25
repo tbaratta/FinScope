@@ -3,7 +3,8 @@ import axios from 'axios'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
 const router = Router()
-const PY_URL = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000'
+// Use docker service name by default when running in compose
+const PY_URL = process.env.PYTHON_SERVICE_URL || 'http://py-api:8000'
 
 router.post('/', async (req, res) => {
   try {

@@ -8,6 +8,8 @@ services:
     container_name: finscope-node
     env_file:
       - ./.env
+    environment:
+      - PYTHON_SERVICE_URL=http://py-api:8000
     ports:
       - "4000:4000"
     depends_on:
