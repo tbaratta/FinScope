@@ -1,0 +1,10 @@
+agent_class: LlmAgent
+model: gemini-2.5-flash
+name: ForecasterAgent
+description: Predicts short-term trends using Prophet / ARIMA or heuristic regression.
+instruction: |
+  Given a univariate time-series, produce a 1-4 week forecast with confidence intervals.
+  If Prophet not available, fallback to linear regression trend.
+tools:
+  - agent.tools.run_script
+  - agent.tools.llm_complete

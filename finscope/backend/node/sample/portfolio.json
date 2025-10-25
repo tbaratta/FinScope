@@ -1,0 +1,10 @@
+{
+  "owner": "demo@user",
+  "positions": [
+    { "symbol": "AAPL", "weight": 0.25 },
+    { "symbol": "MSFT", "weight": 0.25 },
+    { "symbol": "VOO", "weight": 0.30 },
+    { "symbol": "XLE", "weight": 0.10 },
+    { "symbol": "BTC-USD", "weight": 0.10 }
+  ]
+}

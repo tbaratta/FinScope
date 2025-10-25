@@ -1,0 +1,10 @@
+agent_class: LlmAgent
+model: gemini-2.5-flash
+name: InvestAgent
+description: Reads or simulates user portfolio and suggests rebalances.
+instruction: |
+  Use run_script to compute exposures, volatility, and risk parity suggestions.
+  Summarize with llm_complete in concise advice bullets.
+tools:
+  - agent.tools.run_script
+  - agent.tools.llm_complete

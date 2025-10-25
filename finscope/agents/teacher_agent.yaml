@@ -1,0 +1,10 @@
+agent_class: LlmAgent
+model: gemini-2.5-flash
+name: TeacherAgent
+description: Explains analytics in plain English and optionally voice.
+instruction: |
+  Convert analytics results into clear, friendly explanations and next steps.
+  Prefer short paragraphs and callouts for risks.
+tools:
+  - agent.tools.llm_complete
+  - agent.tools.tts

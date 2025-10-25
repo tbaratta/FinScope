@@ -1,0 +1,1 @@
+This folder can host controller modules if routes grow larger. For now, logic is small and embedded within route files.

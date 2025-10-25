@@ -1,0 +1,23 @@
+agent_class: LlmAgent
+model: gemini-2.5-flash
+name: DataAgent
+description: Fetches market and macroeconomic data (Yahoo, FRED, NewsAPI).
+instruction: |
+  Use http_fetch to call public APIs and return normalized JSON.
+  Save summaries to time-series via tsdb_write when available.
+capabilities:
+  - fetch
+  - transform
+  - persist
+resources:
+  - name: yahoo
+    base_url: https://query1.finance.yahoo.com
+  - name: fred
+    base_url: https://api.stlouisfed.org
+  - name: newsapi
+    base_url: https://newsapi.org
+outputs:
+  schema: { type: object, properties: { series: { type: array }, meta: { type: object } } }
+tools:
+  - agent.tools.fetch
+  - agent.tools.tsdb_write

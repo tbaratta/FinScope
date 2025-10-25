@@ -1,0 +1,10 @@
+agent_class: LlmAgent
+model: gemini-2.5-flash
+name: AnalyzerAgent
+description: Detects anomalies, correlations, and regime shifts.
+instruction: |
+  Given time-series arrays, compute z-scores and detect anomalies using Isolation Forest.
+  Return a concise JSON with anomalies (boolean array) and insights (string array).
+tools:
+  - agent.tools.run_script
+  - agent.tools.llm_complete

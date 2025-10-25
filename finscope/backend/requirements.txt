@@ -1,0 +1,1 @@
+# Node backend requires npm; this file is for Python service. (kept at backend/ per spec)

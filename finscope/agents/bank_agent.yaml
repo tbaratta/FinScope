@@ -1,0 +1,8 @@
+agent_class: LlmAgent
+model: gemini-2.5-flash
+name: BankAgent
+description: (Future) Connects to bank/aggregator APIs to import transactions.
+instruction: |
+  This is a stub for future bank integrations (Plaid, Teller, etc.). Avoid using in MVP.
+tools:
+  - agent.tools.fetch
