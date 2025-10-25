@@ -86,10 +86,12 @@ async function getSupabaseUser(req) {
   const base = process.env.SUPABASE_URL
   if (!base) return null
   try {
-    const { data } = await axios.get(`${base}/auth/v1/user`, {
-      headers: { Authorization: `Bearer ${token}` },
-      timeout: 10000,
-    })
+    const apikey = process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY
+    const headers = { Authorization: `Bearer ${token}` }
+    if (apikey) headers['apikey'] = apikey
+    headers['Content-Type'] = 'application/json'
+    headers['X-Client-Info'] = 'finscope-server'
+    const { data } = await axios.get(`${base}/auth/v1/user`, { headers, timeout: 10000 })
     return data || null
   } catch (_) {
     return null
@@ -120,10 +122,16 @@ router.put('/portfolio', async (req, res) => {
     const db = req.app.locals.db
     if (!db) return res.status(500).json({ error: 'Database not configured (set MONGO_URI)' })
     const positions = Array.isArray(req.body?.positions) ? req.body.positions : []
-    // Basic validation: symbol string and weight number
+    // Validation: enforce limits and sum of weights ~ 1.0
+    if (positions.length > 50) return res.status(400).json({ error: 'Too many positions (max 50).' })
     const clean = positions
       .filter(p => p && typeof p.symbol === 'string' && isFinite(p.weight))
       .map(p => ({ symbol: String(p.symbol).toUpperCase().trim(), weight: Number(p.weight) }))
+      .filter(p => p.symbol && p.weight > 0 && p.weight <= 1)
+    const total = clean.reduce((acc, p) => acc + p.weight, 0)
+    if (!(total > 0.95 && total < 1.05)) {
+      return res.status(400).json({ error: 'Weights must sum to approximately 1.0 (±5%).', total })
+    }
     await db.collection('portfolios').updateOne(
       { user_id: user.id },
       { $set: { user_id: user.id, email: user.email, positions: clean, updated_at: new Date() } },
