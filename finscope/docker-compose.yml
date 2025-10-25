@@ -36,6 +36,7 @@ services:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
         VITE_SUPABASE_KEY: ${VITE_SUPABASE_KEY}
         VITE_AUTH_PROVIDER: ${VITE_AUTH_PROVIDER:-email}
+        VITE_PY_API_BASE_URL: ${VITE_PY_API_BASE_URL:-http://localhost:8000}
     container_name: finscope-frontend
     env_file:
       - ./.env

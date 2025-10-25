@@ -11,24 +11,22 @@ import {
 
 ChartJS.register(LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend)
 
-export default function ChartPanel({ title, labels = [], series = [], color = '#22c55e' }) {
-  const data = {
-    labels,
-    datasets: [
-      {
-        label: title,
-        data: series,
-        borderColor: color,
-        backgroundColor: color + '33',
-        fill: true,
-        pointRadius: 0,
-        tension: 0.25,
-      }
-    ]
-  }
+export default function ChartPanel({ title, labels = [], series = [], color = '#22c55e', datasets = null }) {
+  const computedDatasets = datasets || [
+    {
+      label: title,
+      data: series,
+      borderColor: color,
+      backgroundColor: color + '33',
+      fill: true,
+      pointRadius: 0,
+      tension: 0.25,
+    }
+  ]
+  const data = { labels, datasets: computedDatasets }
   const options = {
     responsive: true,
-    plugins: { legend: { display: false } },
+    plugins: { legend: { display: true } },
     scales: { x: { grid: { color: '#1f2937' } }, y: { grid: { color: '#1f2937' } } }
   }
 

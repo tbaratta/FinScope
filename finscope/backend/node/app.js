@@ -26,6 +26,10 @@ if (MONGO_URI) {
     mongo = client.db(MONGO_DB_NAME || 'finscope')
     app.locals.db = mongo
     console.log('MongoDB connected')
+    // Ensure indexes
+    mongo.collection('portfolios').createIndex({ user_id: 1 }, { unique: true })
+      .then(() => console.log('Index ensured: portfolios.user_id (unique)'))
+      .catch(err => console.warn('Index creation warning:', err?.message))
   }).catch(err => console.error('Mongo connection failed', err.message))
 }
 
@@ -34,6 +38,8 @@ const requiredEnv = [
   'ALPHAVANTAGE_API_KEY',
   'FRED_API_KEY',
   'ADK_API_KEY',
+  'SUPABASE_URL',
+  'SUPABASE_KEY',
 ]
 const missing = requiredEnv.filter(k => !process.env[k])
 if (missing.length) {

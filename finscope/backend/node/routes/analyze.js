@@ -24,8 +24,9 @@ router.post('/chat', async (req, res) => {
     const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
     const model = genAI.getGenerativeModel({ model: modelName })
 
-    const messages = req.body?.messages || []
-    const userText = (messages.slice(-1)[0]?.content || '').toString()
+  const messages = Array.isArray(req.body?.messages) ? req.body.messages : []
+  const single = typeof req.body?.message === 'string' ? req.body.message : ''
+  const userText = (messages.slice(-1)[0]?.content || single || '').toString()
     const systemPreamble = 'You are FinScope Mission Control. Provide concise, actionable financial insights with disclaimers. Avoid personal financial advice; offer educational guidance.'
 
     const prompt = `${systemPreamble}\n\nUser: ${userText}`
