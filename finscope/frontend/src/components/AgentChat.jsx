@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api } from '../utils/api'
 
 export default function AgentChat() {
@@ -24,7 +26,23 @@ export default function AgentChat() {
       <div className="font-semibold mb-2">Agent Chat</div>
       <div className="flex-1 overflow-auto space-y-2">
         {messages.map((m, i) => (
-          <div key={i} className={`${m.role === 'user' ? 'text-primary' : 'text-slate-300'}`}>{m.role}: {m.content}</div>
+          <div key={i} className={`${m.role === 'user' ? 'text-primary' : 'text-slate-300'}`}>
+            <div className="text-xs uppercase tracking-wide text-slate-400 mb-1">{m.role}</div>
+            {m.role === 'assistant' ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+                p: ({ children }) => <p className="text-sm leading-6 mb-2">{children}</p>,
+                ul: ({ children }) => <ul className="list-disc list-inside text-sm space-y-1 mb-2">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal list-inside text-sm space-y-1 mb-2">{children}</ol>,
+                strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" className="text-primary hover:underline">{children}</a>,
+                hr: () => <hr className="border-slate-800 my-3" />,
+              }}>
+                {m.content}
+              </ReactMarkdown>
+            ) : (
+              <div className="text-sm">{m.content}</div>
+            )}
+          </div>
         ))}
       </div>
       <form onSubmit={send} className="mt-3 flex gap-2">

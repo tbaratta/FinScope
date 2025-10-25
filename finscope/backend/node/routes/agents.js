@@ -5,6 +5,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import yaml from 'js-yaml'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { setLastReport } from '../controllers/cache.js'
 
 const router = Router()
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -335,6 +336,8 @@ router.post('/report', async (req, res) => {
       personal_finance,
       explanation: teacherOut?.explanation || '',
     }
+    // Cache the latest report for contextual chat
+    try { setLastReport(report) } catch {}
     return res.json({ report, steps: run.steps })
   } catch (err) {
     return res.status(500).json({ error: 'Agent pipeline failed', detail: err?.message, steps: run.steps })
