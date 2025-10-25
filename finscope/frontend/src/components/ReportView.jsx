@@ -1,4 +1,6 @@
 import { useMemo } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Line } from 'react-chartjs-2'
 import {
   Chart as ChartJS,
@@ -71,8 +73,26 @@ export default function ReportView({ report }) {
 
       {rep.explanation && (
         <div className="rounded border border-slate-800 bg-slate-900 p-4">
-          <div className="font-semibold mb-2">Summary & Recommendations</div>
-          <div className="whitespace-pre-wrap text-slate-200 text-sm">{rep.explanation}</div>
+          <div className="font-semibold mb-3">Summary & Recommendations</div>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              h1: ({ children }) => <h3 className="text-lg font-semibold text-slate-100 mb-2">{children}</h3>,
+              h2: ({ children }) => <h4 className="text-base font-semibold text-slate-100 mb-2">{children}</h4>,
+              h3: ({ children }) => <h5 className="text-sm font-semibold text-slate-200 mb-2">{children}</h5>,
+              p: ({ children }) => <p className="text-slate-200 text-sm leading-6 mb-2">{children}</p>,
+              ul: ({ children }) => <ul className="list-disc list-inside text-slate-200 text-sm space-y-1 mb-2">{children}</ul>,
+              ol: ({ children }) => <ol className="list-decimal list-inside text-slate-200 text-sm space-y-1 mb-2">{children}</ol>,
+              li: ({ children }) => <li className="marker:text-slate-400">{children}</li>,
+              strong: ({ children }) => <strong className="text-slate-100 font-semibold">{children}</strong>,
+              em: ({ children }) => <em className="text-slate-300">{children}</em>,
+              a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" className="text-primary hover:underline">{children}</a>,
+              hr: () => <hr className="border-slate-800 my-3" />,
+              code: ({ children }) => <code className="bg-slate-800/80 text-slate-100 px-1 py-0.5 rounded">{children}</code>,
+            }}
+          >
+            {rep.explanation}
+          </ReactMarkdown>
         </div>
       )}
 

@@ -5,6 +5,10 @@ import dotenv from 'dotenv'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { MongoClient } from 'mongodb'
+import helmet from 'helmet'
+import compression from 'compression'
+import rateLimit from 'express-rate-limit'
+import axios from 'axios'
 import dataRoutes from './routes/data.js'
 import analyzeRoutes from './routes/analyze.js'
 import forecastRoutes from './routes/forecast.js'
@@ -16,7 +20,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.resolve(__dirname, '../../.env') })
 
 const app = express()
-app.use(cors())
+
+// Security & performance middleware
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN
+app.use(cors({ origin: FRONTEND_ORIGIN ? [FRONTEND_ORIGIN] : '*', credentials: false }))
+app.use(helmet({ crossOriginResourcePolicy: false }))
+app.use(compression())
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 600 }))
 app.use(express.json({ limit: '2mb' }))
 app.use(morgan('dev'))
 
@@ -35,20 +45,17 @@ if (MONGO_URI) {
   }).catch(err => console.error('Mongo connection failed', err.message))
 }
 
-// Required configuration validation (no demo mode)
-const requiredEnv = [
-  'ALPHAVANTAGE_API_KEY',
-  'FRED_API_KEY',
-  'ADK_API_KEY',
-  'SUPABASE_URL',
-  'SUPABASE_KEY',
+// Config hints (non-fatal): log missing keys that improve features
+const recommendedEnv = [
+  'GOOGLE_API_KEY', // or ADK_API_KEY for LLM
+  'FRED_API_KEY',   // macro series
+  'NEWS_API_KEY',   // headlines (optional)
+  'PLAID_CLIENT_ID',
+  'PLAID_SECRET',
 ]
-const missing = requiredEnv.filter(k => !process.env[k])
-if (missing.length) {
-  console.error('\n[FinScope] Missing required environment variables (no demo mode):')
-  missing.forEach(k => console.error('  -', k))
-  console.error('Set these in finscope/.env or your deployment environment and restart.')
-  process.exit(1)
+const missingRecommended = recommendedEnv.filter(k => !process.env[k])
+if (missingRecommended.length) {
+  console.warn('[FinScope] Optional env not set (features may degrade):', missingRecommended.join(', '))
 }
 
 app.get('/api/health/config', (_req, res) => {
@@ -60,6 +67,17 @@ app.get('/api/health/config', (_req, res) => {
 })
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }))
+app.get('/api/health/ready', async (_req, res) => {
+  // Basic readiness: can we reach Python API?
+  const pyUrl = process.env.PYTHON_SERVICE_URL || 'http://py-api:8000'
+  try {
+    const r = await axios.get(`${pyUrl}/health`, { timeout: 3000 })
+    if (r.status === 200 && r.data?.ok) return res.json({ ok: true })
+    return res.status(503).json({ ok: false, reason: 'py-api unhealthy' })
+  } catch (e) {
+    return res.status(503).json({ ok: false, reason: 'py-api unreachable' })
+  }
+})
 
 app.use('/api/data', dataRoutes)
 app.use('/api/analyze', analyzeRoutes)

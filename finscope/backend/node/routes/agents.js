@@ -332,6 +332,7 @@ router.post('/report', async (req, res) => {
       analysis,
       forecast,
       invest,
+      personal_finance,
       explanation: teacherOut?.explanation || '',
     }
     return res.json({ report, steps: run.steps })

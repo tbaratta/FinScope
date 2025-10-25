@@ -77,16 +77,27 @@ def query_timeseries(metric: str, start: Optional[str] = None, end: Optional[str
 
 
 def upsert_transaction(txn: Dict[str, Any]):
+    # Accept Plaid transaction payloads and generic ones
+    txn_id = txn.get("id") or txn.get("transaction_id") or txn.get("transactionId")
+    currency = txn.get("currency") or txn.get("iso_currency_code") or txn.get("unofficial_currency_code")
+    category_val = txn.get("category")
+    if isinstance(category_val, list):
+        category_str = ",".join(category_val)
+    elif category_val is None:
+        category_str = None
+    else:
+        category_str = str(category_val)
+
     sql = (
         "INSERT INTO transactions(id, date, amount, currency, name, category, account_id, raw) "
-        "VALUES(?,?,?,?,?,?,?, json(?)) "
+        "VALUES(?,?,?,?,?,?,?, ?) "
         "ON CONFLICT(id) DO UPDATE SET date=excluded.date, amount=excluded.amount, currency=excluded.currency, "
         "name=excluded.name, category=excluded.category, account_id=excluded.account_id, raw=excluded.raw"
     )
     with get_conn() as c:
         c.execute(sql, (
-            txn.get("id"), txn.get("date"), float(txn.get("amount")), txn.get("currency"), txn.get("name"),
-            ",".join(txn.get("category", []) if isinstance(txn.get("category"), list) else [str(txn.get("category"))]) if txn.get("category") else None,
+            txn_id, txn.get("date"), float(txn.get("amount")), currency, txn.get("name"),
+            category_str,
             txn.get("account_id"),
             json_dumps_safe(txn)
         ))
