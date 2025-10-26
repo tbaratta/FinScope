@@ -1,142 +1,169 @@
-# FinScope
+<div align="center">
 
-## Performance & Caching
+# FinScope — your daily financial news, simplified
 
-FinScope now includes multi-layer caching to speed up repeat requests and reduce third‑party API calls:
+Stay informed without the noise. FinScope gathers market data and headlines, analyzes what matters, and delivers a clear daily report you can actually read — with a “Beginner Mode” that explains complex topics in plain English.
 
-- Redis-backed shared cache for backend services (Node + Python). Falls back to in‑memory if Redis is unavailable.
-- Node API:
-	- Caches market history, macro (FRED) series, news headlines, and forecasts with sensible TTLs.
-	- Adds Cache-Control headers on summary responses for browser caching.
-- Python API (FastAPI):
-	- Uses fastapi-cache2 to cache /market (120s), /forecast (600s), and /bank/summary (60s).
-- Frontend:
-	- Axios GET interceptor provides a lightweight in‑memory cache and request coalescing (defaults to 30s; 60s for summary).
+• Live demo: https://app.finscope.us  • Video: <link>  • Devpost: <link>
 
-### Runtime defaults
+</div>
 
-- REDIS_URL is wired in docker-compose for both services: `redis://redis:6379/0`.
-- TTLs can be tuned in code:
-	- Node `routes/data.js`: summary 60s; FRED 300s; AlphaVantage 300s; yfinance proxy 120s.
-	- Node `routes/agents.js`: per-symbol market history 120s; macro/news 300s; forecasts 600s.
-	- Python `main.py` @cache expirations as above.
+## Inspiration
+In today’s fast-paced world, staying on top of financial news can feel overwhelming. Between scattered sources, paywalls, and jargon-heavy reports, most people don’t have the time or tools to make sense of what’s happening in the markets each day. We wanted to change that by creating something simple, clear, and convenient — a way for anyone to get daily financial news and insights in one place without the clutter or confusion.
 
-### Local development
+Finance shouldn’t feel like a foreign language. With FinScope, users can easily understand what’s moving the markets, get personalized reports based on their interests, and even enable Beginner Mode to “translate” complex topics into plain English. Whether you’re a beginner exploring finance for the first time or a seasoned pro tracking market trends, FinScope makes it effortless to stay informed and keep learning one daily report at a time.
 
-Start all services (includes Redis):
+## What it does
+- Gathers and summarizes financial news from trusted global sources every morning (NewsAPI with a Reuters RSS fallback — no paywall required).
+- Lets you enter stock tickers (and favorites) for personalized coverage and charts.
+- Highlights market movers, macro signals (10Y, CPI YoY, unemployment), and sentiment.
+- Uses AI agents to extract key insights, trends, and headline impacts per ticker.
+- Beginner Mode rewrites the daily brief in simple, friendly language.
+- Share any report via QR link (time-limited) so friends can read it quickly on mobile.
+- Quick vs Full runs: a fast preview for mornings and a deeper full report when you have time.
 
+The result: market noise becomes a clear, digestible briefing for smarter financial decisions.
+
+## How we built it
+**Frontend**: React 18 + Vite + Tailwind. Axios utilities with in-memory GET cache and request coalescing. Supabase Auth (magic links). Runtime API override for cache-busting (`?api=/api`).
+
+**Backend**: Hybrid Node.js (Express) + Python (FastAPI).
+- Node: routes for agents/report, data summary, share links, settings, Plaid; explicit CORS; health/readiness.
+- Python: market (`/market`), analysis (`/analyze`), forecast (`/forecast`), bank summary (`/bank/summary`).
+
+**AI & data**:
+- Multi-agent pipeline: DataAgent → Analyzer → Macro/News → Optional Forecasts → InvestAgent → Teacher.
+- Sources: Yahoo Finance (series), FRED (macro), NewsAPI/Reuters (headlines), simple news→ticker impact map, optional Plaid sandbox.
+- LLM: Gemini (via `ADK_API_KEY` or `GOOGLE_API_KEY`) for explanations; safe fallback to a rules-based “beginner” summary when keys aren’t set.
+
+**Infra**: Docker Compose (frontend, node, python, redis). Zero-cost deploy using a Cloudflare Named Tunnel with single-domain, path-based routing: `/` → frontend, `/api` → Node, `/py` → Python. This removes cross-origin CORS entirely.
+
+**Caching/perf**:
+- Redis-backed shared cache (fallback to in-memory) for Node + Python.
+- Python `fastapi-cache2` for `/market` (120s), `/forecast` (600s), `/bank/summary` (60s).
+- Node caches macro/news (300s), market series (120s), and forecasts (600s).
+- Frontend Axios GET cache (default 30s; summary 60s).
+
+## Architecture (at a glance)
+```
+Browser (React/Vite) ── same-origin ──> Cloudflare Tunnel (app.yourdomain)
+		 │                                        │
+		 ├─ /api ────────────────────────────────> Node (Express)
+		 │                                        └─ talks to Python, FRED, News, Redis
+		 └─ /py  ────────────────────────────────> Python (FastAPI)
+```
+
+## Run it locally (Windows/PowerShell)
+Prereqs: Docker Desktop.
+
+1) Copy `.env` (fill keys). Recommended for richer data: `FRED_API_KEY`, `ALPHAVANTAGE_API_KEY`, optional `NEWS_API_KEY`, `ADK_API_KEY` or `GOOGLE_API_KEY`.
+
+2) Start the stack:
 ```powershell
-cd .\finscope
-docker-compose up --build -d
+docker compose up -d --build
 ```
 
-Verify health:
-
+3) Open http://localhost:5173
 ```powershell
-Invoke-WebRequest -UseBasicParsing http://localhost:4000/api/health
-Invoke-WebRequest -UseBasicParsing http://localhost:4000/api/health/ready
+Invoke-WebRequest http://localhost:4000/api/health
+Invoke-WebRequest http://localhost:8000/health
 ```
 
-Notes:
-- For best results, set FRED_API_KEY and ALPHAVANTAGE_API_KEY in `.env`. The summary card depends on these.
-- In multi-instance deployments, keep Redis enabled so caches are shared across instances.
+Tip: You can override the API base at runtime if a cached bundle ever appears:
+`http://localhost:5173/?api=http://localhost:4000` (sticks for the tab via sessionStorage).
 
-## Deploying
+## Free deployment (no servers): Cloudflare Tunnel (single domain)
+Use a named tunnel with path routing (no CORS, stable URLs):
 
-You can deploy FinScope with Docker Compose on any VM or server. The stack includes:
-
-- node-api (port 4000)
-- py-api (port 8000)
-- frontend (port 5173)
-- redis (port 6379)
-
-### 1) Prepare environment
-
-1. Copy `.env.example` to `.env` and fill values:
-	 - Required: `FRED_API_KEY`, `ALPHAVANTAGE_API_KEY`
-	 - Optional: `ADK_API_KEY` or `GOOGLE_API_KEY` (LLM for ELI5), `NEWS_API_KEY`, `PLAID_CLIENT_ID/SECRET`, `MONGO_URI`
-	 - For production domain, set:
-		 - `FRONTEND_ORIGIN=https://your.domain`
-		 - `VITE_API_BASE_URL=https://your.domain/api`
-		 - `VITE_PY_API_BASE_URL=https://your.domain/py`
-
-2. Ensure Docker and Docker Compose are installed on the host.
-
-### 2) Run the stack
-
+1) Authenticate and create the tunnel
 ```powershell
-cd .\finscope
-docker-compose up -d --build
+cloudflared tunnel login
+cloudflared tunnel create finscope
+cloudflared tunnel list  # copy the Tunnel ID
 ```
 
-- Frontend: http://localhost:5173
-- Node API: http://localhost:4000
-- Python API: http://localhost:8000
+2) `C:\Users\<you>\.cloudflared\config.yml`
+```yaml
+tunnel: <TUNNEL_ID>
+credentials-file: C:\Users\<you>\.cloudflared\<TUNNEL_ID>.json
 
-### 3) Put it behind a domain (HTTPS)
+ingress:
+	- hostname: app.yourdomain.com
+		path: /api/*
+		service: http://localhost:4000
+		originRequest: { httpHostHeader: localhost }
 
-Option A — Nginx (simple): use `deploy/nginx.conf` as a starting point. It:
+	- hostname: app.yourdomain.com
+		path: /py/*
+		service: http://localhost:8000
+		originRequest: { httpHostHeader: localhost }
 
-- Serves the frontend at `/`
-- Proxies `/api` to Node (:4000)
-- Proxies `/py` to Python (:8000)
+	- hostname: app.yourdomain.com
+		service: http://localhost:5173
+		originRequest: { httpHostHeader: localhost }
 
-Steps (Ubuntu):
-
-```bash
-sudo apt-get install -y nginx
-sudo cp deploy/nginx.conf /etc/nginx/sites-available/finscope
-sudo ln -s /etc/nginx/sites-available/finscope /etc/nginx/sites-enabled/finscope
-# Edit server_name to your domain, then:
-sudo nginx -t && sudo systemctl reload nginx
-# Add TLS (e.g., certbot)
+	- service: http_status:404
 ```
 
-Option B — Caddy (auto TLS): use `deploy/Caddyfile` and install caddy:
-
-```bash
-sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo tee /usr/share/keyrings/caddy-stable-archive-keyring.gpg > /dev/null
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt-get update && sudo apt-get install caddy -y
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-```
-
-Make sure you rebuilt the frontend with the correct build-time env to match your proxy paths:
-
+3) Route DNS and run the tunnel
 ```powershell
-# In finscope folder
-$env:VITE_API_BASE_URL = "https://your.domain/api"; $env:VITE_PY_API_BASE_URL = "https://your.domain/py"; $env:FRONTEND_ORIGIN = "https://your.domain"; docker-compose up -d --build frontend
+cloudflared tunnel route dns finscope app.yourdomain.com
+cloudflared tunnel --config C:\Users\<you>\.cloudflared\config.yml run
 ```
 
-### Quick share without a server
-
-For a quick demo from your laptop, you can expose the frontend with a secure tunnel (e.g., Cloudflare Tunnel) and keep APIs on the default ports:
-
+4) Set env and rebuild once
+```
+FRONTEND_ORIGIN=https://app.yourdomain.com
+VITE_API_BASE_URL=/api
+VITE_PY_API_BASE_URL=/py
+```
 ```powershell
-# Example: Cloudflare Tunnel (after logging in via cloudflared)
-cloudflared tunnel --url http://localhost:5173
+docker compose up -d --build node-api frontend
 ```
 
-Then set `FRONTEND_ORIGIN` in `.env` to the issued https URL and rebuild the frontend.
+5) Supabase Auth
+- Site URL: `https://app.yourdomain.com`
+- Additional Redirect URLs: include the domain above (magic links).
 
-### Health checks
+Now open `https://app.yourdomain.com` and click “Generate Today’s Report”.
 
-```powershell
-Invoke-WebRequest -UseBasicParsing http://localhost:4000/api/health
-Invoke-WebRequest -UseBasicParsing http://localhost:4000/api/health/ready
-```
+## Environment variables (high‑value)
+- `FRONTEND_ORIGIN` — your public origin (used for CORS + share links)
+- `VITE_API_BASE_URL`, `VITE_PY_API_BASE_URL` — set to `/api` and `/py` for single-domain routing
+- `FRED_API_KEY`, `ALPHAVANTAGE_API_KEY` — richer summary cards
+- `ADK_API_KEY` or `GOOGLE_API_KEY` — Gemini teacher explanations
+- `NEWS_API_KEY` — higher-quality headlines (falls back to Reuters RSS)
+- `PLAID_CLIENT_ID`, `PLAID_SECRET` — optional Plaid sandbox
+- `REDIS_URL` — `redis://redis:6379/0` (compose default)
 
-If `/api/data/summary` errors with missing keys, add `FRED_API_KEY` and `ALPHAVANTAGE_API_KEY` to `.env` and recreate containers.
+## Challenges we ran into
+- CORS over quick tunnels: Cloudflare’s edge answered preflights; fixed via explicit OPTIONS handling and ultimately removed CORS by going single-domain.
+- Vite host checks: solved with `allowedHosts` and `httpHostHeader: localhost` in the tunnel.
+- Supabase redirects: magic links initially pointed to localhost; fixed Auth “Site URL” + redirect origins.
+- Stale bundles: browsers/edge cached old JS with old API URLs; added a runtime `?api=` override and recommended Cloudflare Development Mode during deploy.
 
-## Quick vs Full reports
+## Accomplishments we’re proud of
+- End‑to‑end agent pipeline with market, macro, news, forecasts, and a friendly teacher.
+- Beginner Mode that “translates” finance into plain English.
+- QR sharing with TTL — send a daily report to your phone in seconds.
+- Zero‑cost, stable deployment using a single Cloudflare Tunnel domain (no CORS, no servers).
 
-- Quick mode: Skips forecasts and the AI teacher step. Generates a fast preview with market data, macro, headlines, technicals, and a simple beginner summary. Useful for a quick morning glance or on small machines.
-- Full mode: Includes 14‑day forecasts and the AI teacher explanation (uses Gemini if `ADK_API_KEY` or `GOOGLE_API_KEY` is set). More detailed, takes a bit longer.
+## What we learned
+- Don’t fight CORS if you can avoid it — same‑origin routing is simpler and faster.
+- Cache the right layers: browser, Node, Python, and shared Redis each provide a big UX boost.
+- Clear UX wins: Quick vs Full, favorites, gentle hints when keys are missing.
 
-You can toggle this in the ticker bar via the “Quick mode” checkbox. In production, set the appropriate keys in `.env` to unlock all features:
+## What’s next for FinScope
+- Notifications and inbox delivery (email/Telegram/Discord) for the daily brief.
+- Portfolio import + deeper personal finance insights.
+- Multilingual summaries and voice briefings.
+- More robust LLM guardrails and explain‑like‑I’m‑5 glossary.
+- PWA for offline reading.
 
-- FRED_API_KEY, ALPHAVANTAGE_API_KEY — Summary cards (10Y yield, CPI YoY, SPY daily).
-- ADK_API_KEY or GOOGLE_API_KEY — AI teacher explanation (beginner/normal).
-- NEWS_API_KEY — Higher‑quality business headlines (falls back to Reuters RSS if omitted).
+## Screenshots / Demo
+- Dashboard (daily brief) — <screenshot>
+- Beginner Mode explanation — <screenshot>
+- Share via QR — <screenshot>
+
+## License
+MIT

@@ -1,6 +1,7 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000' })
+// Hardcode production API base
+const api = axios.create({ baseURL: 'https://app.finscope.us/api' })
 
 export function useApi() {
   return api

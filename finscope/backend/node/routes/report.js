@@ -12,7 +12,8 @@ router.post('/', async (req, res) => {
     const symbols = Array.isArray(req.body?.symbols) ? req.body.symbols : []
     let agentResponse
     try {
-      const { data } = await axios.post('http://localhost:4000/api/agents/report', symbols.length ? { symbols } : {})
+      // Hardcode to public API base to avoid localhost in production
+      const { data } = await axios.post('https://app.finscope.us/api/agents/report', symbols.length ? { symbols } : {})
       agentResponse = data
     } catch (e) {
       agentResponse = { error: 'Agent pipeline failed', detail: e?.message }

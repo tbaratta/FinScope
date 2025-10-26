@@ -1,21 +1,46 @@
 import axios from 'axios'
 import { supabase } from './supabase'
 
-export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000'
+// Hardcode production API base to ensure no stale domains are used in the bundle
+export const API_BASE = 'https://app.finscope.us/api'
 export const api = axios.create({ baseURL: API_BASE })
+try { console.debug('[FinScope] API_BASE =', API_BASE) } catch (_) {}
 
 // Simple in-memory GET cache and request coalescing
 const responseCache = new Map() // key -> { exp: number, data: any }
 const inflight = new Map() // key -> Promise
 
 function cacheKey(config) {
-	const url = config.baseURL ? new URL(config.url, config.baseURL).toString() : config.url
+	// Build a stable key even if baseURL is relative (e.g., '/api')
+	try {
+		if (config.baseURL && /^https?:\/\//i.test(String(config.baseURL))) {
+			const u = new URL(config.url, config.baseURL)
+			return `${config.method || 'get'}:${u.toString()}?${config.params ? JSON.stringify(config.params) : ''}`
+		}
+	} catch (_) {}
+	const base = (config.baseURL || '').replace(/\/+$/, '')
+	const path = String(config.url || '').replace(/^\/+/, '')
+	const url = base ? `${base}/${path}` : `/${path}`
 	const params = config.params ? JSON.stringify(config.params) : ''
 	return `${config.method || 'get'}:${url}?${params}`
 }
 
 // Attach Supabase JWT to outgoing requests when available
 api.interceptors.request.use(async (config) => {
+	// Normalize URL to avoid double '/api' when baseURL already includes it
+	try {
+		const base = (config.baseURL ?? API_BASE ?? '').replace(/\/+$/, '')
+		if (typeof config.url === 'string') {
+			let url = config.url
+			// If base ends with '/api' and url starts with '/api/', strip one '/api'
+			if (/\/api$/i.test(base) && /^\/api\//i.test(url)) {
+				url = url.replace(/^\/api\//i, '/')
+			}
+			// Also collapse any accidental double slashes (but keep 'http://')
+			url = url.replace(/([^:])\/+/g, '$1/')
+			config.url = url
+		}
+	} catch (_) {}
 	try {
 		if (supabase) {
 			const { data: { session } } = await supabase.auth.getSession()

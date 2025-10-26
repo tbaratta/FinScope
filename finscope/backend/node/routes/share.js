@@ -15,8 +15,9 @@ router.post('/', async (req, res) => {
     const token = crypto.randomBytes(8).toString('hex')
     const ttlSec = Math.max(300, Math.min(86400, Number(process.env.SHARE_TTL_SECONDS || 3600))) // default 1h
     await cacheSet(`share:${token}`, rep, ttlSec)
-    const origin = process.env.FRONTEND_ORIGIN || process.env.VITE_FRONTEND_ORIGIN || ''
-    const url = origin ? `${origin.replace(/\/$/, '')}/share/${token}` : `/share/${token}`
+  // Hardcode production origin to ensure QR/link always uses the public app domain
+  const origin = 'https://app.finscope.us'
+  const url = `${origin.replace(/\/$/, '')}/share/${token}`
     return res.json({ token, url, ttl_seconds: ttlSec })
   } catch (e) {
     return res.status(500).json({ error: 'Failed to create share', detail: e?.message })

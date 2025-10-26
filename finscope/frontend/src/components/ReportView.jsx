@@ -104,7 +104,7 @@ export default function ReportView({ report }) {
                                                                  try {
                                                                       setSharing(true); setShareError('')
                                                                       const { data } = await api.post('/api/share')
-                                                                      const url = data?.url || ''
+                                                                      const url = data?.url || (data?.token ? `https://app.finscope.us/share/${data.token}` : '')
                                                                       setShareUrl(url)
                                                                       if (url) {
                                                                            try {
