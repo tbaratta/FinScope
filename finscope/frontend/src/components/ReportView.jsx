@@ -78,7 +78,7 @@ export default function ReportView({ report }) {
      return (
           <div className="space-y-6">
                <div className="flex flex-wrap items-center gap-2">
-                    <div className="text-xl font-semibold">FinScope Report</div>
+                    <div className="text-xl font-semibold">Today's FinScope Report</div>
                     <div className="text-slate-400 text-sm">{formatDateTime(rep.generated_at, settings?.timezone)}</div>
                     {symbols.map(s => (
                          <span key={s} className="px-2 py-1 rounded bg-primary/20 border border-primary/30 text-primary text-xs">{s}</span>
