@@ -11,6 +11,11 @@ import yfinance as yf
 from agents.orchestrator import generate_report
 from db import init_db, insert_timeseries, query_timeseries, upsert_transaction, get_conn
 from datetime import datetime, timezone
+import os
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.redis import RedisBackend
+from fastapi_cache.decorator import cache
+import redis.asyncio as aioredis
 
 # Create FastAPI app instance first
 app = FastAPI(title="FinScope Python Service")
@@ -18,6 +23,23 @@ app = FastAPI(title="FinScope Python Service")
 @app.on_event("startup")
 async def _startup():
     init_db()
+    # Configure caching
+    try:
+        redis_url = os.getenv('REDIS_URL')
+        if redis_url:
+            r = aioredis.from_url(redis_url, encoding="utf8", decode_responses=True)
+            FastAPICache.init(RedisBackend(r), prefix="finscope-cache")
+        else:
+            # In-memory fallback (simple backend inside fastapi-cache2)
+            from fastapi_cache.backends.inmemory import InMemoryBackend
+            FastAPICache.init(InMemoryBackend(), prefix="finscope-cache")
+    except Exception as e:
+        # Fallback to in-memory if Redis not available
+        try:
+            from fastapi_cache.backends.inmemory import InMemoryBackend
+            FastAPICache.init(InMemoryBackend(), prefix="finscope-cache")
+        except Exception:
+            pass
 
 @app.post("/report")
 async def report(payload: dict = Body(...)):
@@ -98,6 +120,7 @@ async def analyze(payload: AnalyzeInput = Body(...)):
         return {"error": str(e)}
 
 @app.get("/forecast")
+@cache(expire=600)
 async def forecast(symbol: str = "SPY", horizon: int = 14):
     """Forecast using simple linear regression over recent market closes via yfinance."""
     # Pull recent history
@@ -165,6 +188,7 @@ async def simulate(sim: SimInput):
         return {"error": str(e)}
 
 @app.get("/market")
+@cache(expire=120)
 async def market(
     symbol: str = Query(..., description="Ticker symbol, e.g., SPY"),
     period: str = Query("1mo", description="yfinance period, e.g., 1mo, 3mo, 6mo, 1y"),
@@ -287,32 +311,45 @@ async def bank_transactions(payload: dict = Body(...)):
 
 # --- Bank summary aggregates (last N days)
 @app.get("/bank/summary")
+@cache(expire=60)
 async def bank_summary(days: int = 30):
     try:
-        # derive date cutoff
+        # derive date cutoff and month-to-date start
         from datetime import date, timedelta
-        cutoff = (date.today() - timedelta(days=max(1, days))).isoformat()
+        today = date.today()
+        cutoff = (today - timedelta(days=max(1, days))).isoformat()
+        mtd_start = today.replace(day=1).isoformat()
         by_category = {}
         by_merchant = {}
-        total = 0.0
+        total_spend = 0.0
+        total_income = 0.0
+        mtd_spend = 0.0
+        mtd_income = 0.0
         with get_conn() as c:
-            # Only consider positive amounts (spend)
-            cur = c.execute("SELECT date, name, amount, category FROM transactions WHERE date>=? AND amount>0", (cutoff,))
+            cur = c.execute("SELECT date, name, amount, category FROM transactions WHERE date>=?", (cutoff,))
             for d, name, amount, category in cur.fetchall():
                 amt = float(amount or 0)
-                total += amt
-                cat = None
-                if category:
-                    # category is a comma-separated string; use the first element as top-level
-                    cat = str(category).split(',')[0].strip()
-                cat = cat or 'Uncategorized'
-                by_category.setdefault(cat, {'count': 0, 'total': 0.0})
-                by_category[cat]['count'] += 1
-                by_category[cat]['total'] += amt
-                nm = name or 'Unknown'
-                by_merchant.setdefault(nm, {'count': 0, 'total': 0.0})
-                by_merchant[nm]['count'] += 1
-                by_merchant[nm]['total'] += amt
+                # Positive amounts = spend; negative = income/credits (Plaid often uses positive for outflow)
+                if amt > 0:
+                    total_spend += amt
+                    if d >= mtd_start:
+                        mtd_spend += amt
+                    # categorize spend only
+                    cat = None
+                    if category:
+                        cat = str(category).split(',')[0].strip()
+                    cat = cat or 'Uncategorized'
+                    by_category.setdefault(cat, {'count': 0, 'total': 0.0})
+                    by_category[cat]['count'] += 1
+                    by_category[cat]['total'] += amt
+                    nm = name or 'Unknown'
+                    by_merchant.setdefault(nm, {'count': 0, 'total': 0.0})
+                    by_merchant[nm]['count'] += 1
+                    by_merchant[nm]['total'] += amt
+                elif amt < 0:
+                    total_income += abs(amt)
+                    if d >= mtd_start:
+                        mtd_income += abs(amt)
         # format top lists
         top_categories = sorted([
             {'category': k, 'count': v['count'], 'total': round(v['total'], 2)} for k, v in by_category.items()
@@ -322,9 +359,32 @@ async def bank_summary(days: int = 30):
         ], key=lambda x: x['total'], reverse=True)[:8]
         # recurring = merchants with >=3 transactions within the window
         recurring = [m for m in top_merchants if m['count'] >= 3]
+        # savings insights
+        net_savings = round(total_income - total_spend, 2)
+        savings_rate_pct = round((net_savings / total_income) * 100, 2) if total_income > 0 else None
+        mtd_net = round(mtd_income - mtd_spend, 2)
+        mtd_rate_pct = round((mtd_net / mtd_income) * 100, 2) if mtd_income > 0 else None
+        # budget insights (from env var MONTHLY_BUDGET or BUDGET_USD)
+        budget = 0.0
+        try:
+            budget = float(os.getenv('MONTHLY_BUDGET') or os.getenv('BUDGET_USD') or 0)
+        except Exception:
+            budget = 0.0
+        budget_remaining = round(budget - mtd_spend, 2) if budget else None
+        budget_utilization_pct = round((mtd_spend / budget) * 100, 2) if budget else None
         return {
             'window_days': days,
-            'total_spend': round(total, 2),
+            'total_spend': round(total_spend, 2),
+            'total_income': round(total_income, 2),
+            'net_savings': net_savings,
+            'savings_rate_pct': savings_rate_pct,
+            'mtd_spend': round(mtd_spend, 2),
+            'mtd_income': round(mtd_income, 2),
+            'mtd_net_savings': mtd_net,
+            'mtd_savings_rate_pct': mtd_rate_pct,
+            'monthly_budget': budget if budget else None,
+            'budget_remaining': budget_remaining,
+            'budget_utilization_pct': budget_utilization_pct,
             'top_categories': top_categories,
             'top_merchants': top_merchants,
             'recurring_merchants': recurring,

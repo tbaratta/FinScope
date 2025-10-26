@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url'
 import yaml from 'js-yaml'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { setLastReport } from '../controllers/cache.js'
+import { withCache, keyOf } from '../lib/kvCache.js'
 
 const router = Router()
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -13,6 +14,38 @@ const AGENTS_DIR = path.resolve(__dirname, '../../../agents')
 const PY_URL = process.env.PYTHON_SERVICE_URL || 'http://py-api:8000'
 const FRED_API_KEY = process.env.FRED_API_KEY
 const NEWS_API_KEY = process.env.NEWS_API_KEY
+
+// In-flight request dedupe and simple concurrency control
+const inflight = new Map() // key -> Promise
+
+function dedupe(key, task) {
+  if (inflight.has(key)) return inflight.get(key)
+  const p = (async () => {
+    try { return await task() } finally { inflight.delete(key) }
+  })()
+  inflight.set(key, p)
+  return p
+}
+
+async function mapLimit(items, limit, worker) {
+  const results = new Array(items.length)
+  let i = 0
+  let active = 0
+  return await new Promise((resolve) => {
+    const next = () => {
+      while (active < limit && i < items.length) {
+        const idx = i++
+        active++
+        Promise.resolve(worker(items[idx], idx))
+          .then(r => { results[idx] = r })
+          .catch(e => { results[idx] = { __error: e?.message || String(e) } })
+          .finally(() => { active--; (i >= items.length && active === 0) ? resolve(results) : next() })
+      }
+      if (i >= items.length && active === 0) resolve(results)
+    }
+    next()
+  })
+}
 
 function loadAgent(fileName) {
   try {
@@ -127,25 +160,36 @@ async function fetchNewsHeadlines() {
 router.post('/report', async (req, res) => {
   const run = { steps: [] }
   try {
+    const t0 = Date.now()
     // Load agent YAMLs (for future capability flags; not strictly required to run)
   const dataAgent = loadAgent('data_collector_agent.yaml')
   const analyzerAgent = loadAgent('analyzer_agent.yaml')
   const teacherAgent = loadAgent('teacher_agent.yaml')
 
   const { positions, symbols } = extractPositionsFromPayload(req.body || {})
+  const isFast = (String(req.query?.fast || '').toLowerCase() === '1') || (req.body && req.body.fast === true)
+  run.mode = isFast ? 'fast' : 'full'
   run.input = { symbols, positions }
 
     // Step 1: Data (via Python service)
   const seriesMap = {}
     const labelsRef = new Set()
     const failures = []
-    for (const sym of symbols) {
+    const seriesResults = await mapLimit(symbols, 4, async (sym) => {
       try {
-        const s = await fetchSeries(sym, '6mo', '1d')
-        seriesMap[sym] = s
-        for (const d of (s.labels || [])) labelsRef.add(d)
+        const s = await withCache({ key: `yf:${sym}:6mo:1d`, ttlSec: 120, task: () => fetchSeries(sym, '6mo', '1d') })
+        return { sym, s }
       } catch (e) {
-        failures.push({ symbol: sym, error: e?.message || String(e) })
+        return { sym, error: e?.message || String(e) }
+      }
+    })
+    for (const r of seriesResults) {
+      if (!r) continue
+      if (r.error || !r.s) {
+        failures.push({ symbol: r.sym, error: r.error || 'unknown' })
+      } else {
+        seriesMap[r.sym] = r.s
+        for (const d of (r.s.labels || [])) labelsRef.add(d)
       }
     }
     run.steps.push({ name: dataAgent?.name || 'DataAgent', type: 'data', symbols, status: failures.length ? 'partial' : 'ok', failures })
@@ -202,11 +246,11 @@ router.post('/report', async (req, res) => {
 
     // Step 3: Macro (FRED), News, and VIX
     const [dgs10, cpi, unrate, headlines, vix] = await Promise.all([
-      fetchFredSeries('DGS10'),
-      fetchFredSeries('CPIAUCSL'),
-      fetchFredSeries('UNRATE'),
-      fetchNewsHeadlines(),
-      fetchSeries('^VIX', '6mo', '1d').catch(() => null),
+      withCache({ key: 'fred:DGS10', ttlSec: 300, task: () => fetchFredSeries('DGS10') }),
+      withCache({ key: 'fred:CPIAUCSL', ttlSec: 300, task: () => fetchFredSeries('CPIAUCSL') }),
+      withCache({ key: 'fred:UNRATE', ttlSec: 300, task: () => fetchFredSeries('UNRATE') }),
+      withCache({ key: 'news:top', ttlSec: 300, task: () => fetchNewsHeadlines() }),
+      withCache({ key: 'yf:^VIX:6mo:1d', ttlSec: 120, task: () => fetchSeries('^VIX', '6mo', '1d').catch(() => null) }),
     ])
     let cpiYoY = null
     if (cpi?.obs?.length >= 13) {
@@ -230,20 +274,30 @@ router.post('/report', async (req, res) => {
     } catch (_) {}
     run.steps.push({ name: 'BankSummary', type: 'context', status: personal_finance ? 'ok' : 'empty' })
 
-    // Step 3.5: Forecasts (call Python /forecast for each symbol)
+    // Step 3.5: Forecasts (call Python /forecast for each symbol) — parallelized and skippable in fast mode
     const forecast = {}
-    for (const sym of okSymbols) {
-      try {
-        const r = await axios.get(`${PY_URL}/forecast`, { params: { symbol: sym, horizon: 14 }, timeout: 15000 })
-        const f = r.data
-        if (!f?.error && Array.isArray(f?.forecast)) {
-          forecast[sym] = f
+    if (!isFast) {
+      const fResults = await mapLimit(okSymbols, 4, async (sym) => {
+        try {
+          const r = await withCache({
+            key: `py:forecast:${sym}:14`,
+            ttlSec: 600,
+            task: async () => {
+              const r = await axios.get(`${PY_URL}/forecast`, { params: { symbol: sym, horizon: 14 }, timeout: 15000 })
+              return r
+            }
+          })
+          const f = r.data
+          return (!f?.error && Array.isArray(f?.forecast)) ? { sym, f } : { sym }
+        } catch (e) {
+          return { sym, error: e?.message || String(e) }
         }
-      } catch (_) {
-        // ignore individual forecast failures
-      }
+      })
+      fResults.forEach(r => { if (r && r.f) forecast[r.sym] = r.f })
+      run.steps.push({ name: 'ForecasterAgent', type: 'forecast', status: Object.keys(forecast).length ? 'ok' : 'empty', output: Object.keys(forecast) })
+    } else {
+      run.steps.push({ name: 'ForecasterAgent', type: 'forecast', status: 'skipped' })
     }
-    run.steps.push({ name: 'ForecasterAgent', type: 'forecast', status: Object.keys(forecast).length ? 'ok' : 'empty', output: Object.keys(forecast) })
 
     // Compute per-asset overview and technicals
     const asset_overview = {}
@@ -304,8 +358,14 @@ router.post('/report', async (req, res) => {
     run.steps.push({ name: 'InvestAgent', type: 'invest', status: invest?.error ? 'error' : 'ok', output: invest })
 
     // Step 5: Teacher (LLM explanation across market, macro, news, technicals, forecasts, invest)
-    const teacherOut = await runTeacher({ symbols: okSymbols, asset_overview, macro, headlines, technicals, analysis, forecast, personal_finance }, teacherAgent)
-    run.steps.push({ name: teacherAgent?.name || 'TeacherAgent', type: 'teach', status: 'ok', output: teacherOut })
+    let teacherOut
+    if (!isFast) {
+      teacherOut = await runTeacher({ symbols: okSymbols, asset_overview, macro, headlines, technicals, analysis, forecast, personal_finance }, teacherAgent)
+      run.steps.push({ name: teacherAgent?.name || 'TeacherAgent', type: 'teach', status: 'ok', output: teacherOut })
+    } else {
+      teacherOut = { explanation: 'Quick preview mode — forecasts and detailed explanation skipped. Generate full report for deeper insights.' }
+      run.steps.push({ name: 'TeacherAgent', type: 'teach', status: 'skipped' })
+    }
 
     // Build compact timeseries for charts (last ~120 points)
     const series = {}
@@ -338,7 +398,14 @@ router.post('/report', async (req, res) => {
     }
     // Cache the latest report for contextual chat
     try { setLastReport(report) } catch {}
-    return res.json({ report, steps: run.steps })
+    // Also cache full agents report keyed by symbols/weights/mode for a short time (60s) and dedupe in-flight
+    const cacheKey = keyOf('agents:report', { symbols, weightMap, mode: run.mode })
+    const payload = await dedupe(cacheKey, async () => {
+      try { await withCache({ key: cacheKey, ttlSec: 60, task: async () => report }) } catch {}
+      return { report, steps: run.steps }
+    })
+    res.set('X-Report-Duration-ms', String(Date.now() - t0))
+    return res.json(payload)
   } catch (err) {
     return res.status(500).json({ error: 'Agent pipeline failed', detail: err?.message, steps: run.steps })
   }

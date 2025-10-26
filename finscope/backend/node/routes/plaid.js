@@ -30,9 +30,11 @@ function ensurePlaid(res) {
   return true
 }
 
-// In-memory token store keyed by user id.
-// For production, replace with a persistent store (e.g., database).
-const tokenStore = new Map()
+// In-memory token store keyed by user id and item id.
+// For production, replace with a persistent store (e.g., database or secrets vault).
+const tokenStore = new Map()           // user_id -> access_token
+const itemToAccess = new Map()         // item_id -> access_token
+const itemToUser = new Map()           // item_id -> user_id
 
 router.post('/create_link_token', async (req, res) => {
   try {
@@ -44,7 +46,8 @@ router.post('/create_link_token', async (req, res) => {
       products: ['transactions'],
       country_codes: ['US'],
       language: 'en',
-      webhook: undefined,
+      webhook: process.env.PLAID_WEBHOOK_URL || undefined,
+      // In sandbox, OAuth redirect is not required; keep undefined unless configured
       redirect_uri: process.env.PLAID_REDIRECT_URI || undefined,
     })
     res.json({ link_token: resp.data.link_token, user_id: userId })
@@ -62,6 +65,11 @@ router.post('/exchange_public_token', async (req, res) => {
     const resp = await plaid.itemPublicTokenExchange({ public_token })
     // Store server-side and do NOT send access token to client.
     tokenStore.set(user_id, resp.data.access_token)
+    // Track item <-> access/user mapping for webhooks
+    if (resp.data.item_id) {
+      itemToAccess.set(resp.data.item_id, resp.data.access_token)
+      itemToUser.set(resp.data.item_id, user_id)
+    }
     res.json({ ok: true, item_id: resp.data.item_id, user_id })
   } catch (err) {
     res.status(500).json({ error: 'exchange_public_token failed', detail: err?.response?.data || err?.message })
@@ -95,6 +103,43 @@ router.post('/transactions/store', async (req, res) => {
     res.json({ ...resp.data, user_id })
   } catch (err) {
     res.status(500).json({ error: 'store transactions failed', detail: err?.message })
+  }
+})
+
+// Plaid webhook to receive transaction updates and item status events
+router.post('/webhook', async (req, res) => {
+  try {
+    const body = req.body || {}
+    const type = body.webhook_type
+    const code = body.webhook_code
+    const item_id = body.item_id
+    if (type === 'TRANSACTIONS' && item_id) {
+      const access_token = itemToAccess.get(item_id)
+      const user_id = itemToUser.get(item_id) || 'demo-user'
+      if (!access_token) {
+        // Cannot act without access token; acknowledge to prevent retries
+        return res.json({ ok: true, ignored: 'no-access-token-for-item' })
+      }
+      // On updates, fetch recent transactions window and persist
+      const end = new Date()
+      const start = new Date()
+      start.setDate(end.getDate() - 30)
+      const fmt = (d) => d.toISOString().slice(0, 10)
+      try {
+        const tx = await plaid.transactionsGet({ access_token, start_date: fmt(start), end_date: fmt(end) })
+        const transactions = tx?.data?.transactions || []
+        if (transactions.length) {
+          await axios.post(`${PY_URL}/bank/transactions`, { transactions }, { timeout: 15000 })
+        }
+      } catch (e) {
+        // swallow errors; webhook should still ack
+      }
+      return res.json({ ok: true, handled: code || 'TRANSACTIONS_UPDATE', count: undefined })
+    }
+    // Acknowledge other webhook types without action for now
+    return res.json({ ok: true, received: { type, code } })
+  } catch (e) {
+    return res.json({ ok: true })
   }
 })
 

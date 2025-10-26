@@ -18,10 +18,10 @@ export default function Dashboard() {
  
   const computeChart = useCallback(async () => {
     try {
-      const res = await api.get('/api/data/summary')
+      const res = await api.get('/api/data/summary', { cacheTTL: 60 })
       const summary = res.data || {}
       setCards(summary.cards || [])
-    } catch (_) {}
+    } catch (_) { }
   }, [])
  
   useEffect(() => { computeChart() }, [computeChart])

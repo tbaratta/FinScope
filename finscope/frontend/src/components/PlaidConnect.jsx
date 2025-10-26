@@ -29,7 +29,11 @@ export default function PlaidConnect() {
     }
   }, [userId])
 
-  const { open, ready } = usePlaidLink({ token: linkToken, onSuccess })
+  // Support OAuth redirect flows by passing the current URL back to Link when present
+  const search = typeof window !== 'undefined' ? window.location.search : ''
+  const hasOAuthParams = search.includes('plaid_link_token') || search.includes('oauth_state_id')
+  const receivedRedirectUri = hasOAuthParams && typeof window !== 'undefined' ? window.location.href : undefined
+  const { open, ready } = usePlaidLink({ token: linkToken, onSuccess, receivedRedirectUri })
 
   const fetchTxns = async () => {
     setError('')
@@ -54,7 +58,7 @@ export default function PlaidConnect() {
 
   return (
     <div className="rounded border border-slate-800 bg-slate-900 p-4">
-      <div className="font-semibold mb-2">Bank (Plaid Sandbox)</div>
+      <div className="font-semibold mb-2">Bank (Plaid)</div>
       {error && <div className="text-red-400 text-sm mb-2">{String(error)}</div>}
       <div className="flex gap-2 mb-2">
   <button onClick={() => open()} disabled={!ready} className="px-3 py-2 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-50">Connect Bank</button>

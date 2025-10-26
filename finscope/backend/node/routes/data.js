@@ -1,11 +1,14 @@
 import { Router } from 'express'
 import axios from 'axios'
+import { withCache } from '../lib/kvCache.js'
 
 const router = Router()
 
-// Simple in-memory cache
-let cache = { summary: null, ts: 0 }
-const ttlMs = 60_000
+// Cache TTLs (seconds)
+const TTL_SUMMARY = 60
+const TTL_FRED = 300
+const TTL_ALPHA = 300
+const TTL_YF = 120
 
 async function fetchAlphaDaily(symbol, apiKey) {
   const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${encodeURIComponent(symbol)}&outputsize=compact&apikey=${apiKey}`
@@ -35,24 +38,33 @@ async function fetchFredSeries(seriesId, apiKey) {
 
 router.get('/summary', async (_req, res) => {
   try {
-    const now = Date.now()
-    if (cache.summary && (now - cache.ts < ttlMs)) return res.json(cache.summary)
-
-
+    // Gather dependencies with caching
     const { FRED_API_KEY, ALPHAVANTAGE_API_KEY } = process.env
     if (!FRED_API_KEY || !ALPHAVANTAGE_API_KEY) {
       return res.status(500).json({ error: 'Missing API keys: set FRED_API_KEY and ALPHAVANTAGE_API_KEY in .env' })
     }
 
-    // S&P proxy: SPY via AlphaVantage (equities)
-    const spy = await fetchAlphaDaily('SPY', ALPHAVANTAGE_API_KEY)
-    // BTC via yfinance through Python service
-  const pyUrl = process.env.PYTHON_SERVICE_URL || 'http://py-api:8000'
-    const btc = await fetchYfViaPython(pyUrl, 'BTC-USD', '1mo', '1d')
-    // 10Y yield
-    const dgs10 = await fetchFredSeries('DGS10', FRED_API_KEY)
-    // CPI YoY: compute from CPIAUCSL
-    const cpi = await fetchFredSeries('CPIAUCSL', FRED_API_KEY)
+    const spy = await withCache({
+      key: `alpha:SPY:daily`,
+      ttlSec: TTL_ALPHA,
+      task: () => fetchAlphaDaily('SPY', ALPHAVANTAGE_API_KEY)
+    })
+    const pyUrl = process.env.PYTHON_SERVICE_URL || 'http://py-api:8000'
+    const btc = await withCache({
+      key: `yf:BTC-USD:1mo:1d`,
+      ttlSec: TTL_YF,
+      task: () => fetchYfViaPython(pyUrl, 'BTC-USD', '1mo', '1d')
+    })
+    const dgs10 = await withCache({
+      key: `fred:DGS10`,
+      ttlSec: TTL_FRED,
+      task: () => fetchFredSeries('DGS10', FRED_API_KEY)
+    })
+    const cpi = await withCache({
+      key: `fred:CPIAUCSL`,
+      ttlSec: TTL_FRED,
+      task: () => fetchFredSeries('CPIAUCSL', FRED_API_KEY)
+    })
     const obs = cpi.obs
     const last = Number(obs[obs.length-1].value)
     const prev = Number(obs[Math.max(0, obs.length-13)].value)
@@ -71,7 +83,8 @@ router.get('/summary', async (_req, res) => {
       chart: { labels, series }
     }
 
-    cache = { summary, ts: now }
+    // Client caching hints
+    res.set('Cache-Control', `public, max-age=${TTL_SUMMARY}, stale-while-revalidate=60`)
     res.json(summary)
   } catch (err) {
     res.status(500).json({ error: 'Failed to load summary', detail: err?.message })
