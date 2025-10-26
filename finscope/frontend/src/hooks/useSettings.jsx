@@ -23,6 +23,7 @@ const defaultSettings = {
   currency: 'USD',
   timezone: 'America/New_York',
   beginnerMode: false,
+  favorites: [],
 }
 
 const SettingsContext = createContext({

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Line } from 'react-chartjs-2'
@@ -13,6 +13,9 @@ import {
 } from 'chart.js'
 import { useSettings } from '../hooks/useSettings.jsx'
 import { formatCurrency, formatPercent, formatDateTime } from '../utils/format.js'
+import { api } from '../utils/api'
+import QRCode from 'qrcode'
+import FavoriteStar from './FavoriteStar.jsx'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend)
 
@@ -29,6 +32,10 @@ function Card({ title, value, badge }) {
 export default function ReportView({ report }) {
      const rep = report?.report || report
      if (!rep) return null
+     const [shareUrl, setShareUrl] = useState('')
+     const [qrDataUrl, setQrDataUrl] = useState('')
+     const [sharing, setSharing] = useState(false)
+     const [shareError, setShareError] = useState('')
 
      const symbols = rep.input_symbols || []
      const series = rep.series || {}
@@ -81,9 +88,57 @@ export default function ReportView({ report }) {
                     <div className="text-xl font-semibold">Today's FinScope Report</div>
                     <div className="text-slate-400 text-sm">{formatDateTime(rep.generated_at, settings?.timezone)}</div>
                     {symbols.map(s => (
-                         <span key={s} className="px-2 py-1 rounded bg-primary/20 border border-primary/30 text-primary text-xs">{s}</span>
+                         <span key={s} className="flex items-center px-2 py-1 rounded bg-primary/20 border border-primary/30 text-primary text-xs">
+                              <span>{s}</span>
+                              <FavoriteStar symbol={s} size="xs" />
+                         </span>
                     ))}
+                                                  <div className="ml-auto flex items-center gap-2">
+                                                       <button
+                                                            onClick={async () => {
+                                                                 try {
+                                                                      setSharing(true); setShareError('')
+                                                                      const { data } = await api.post('/api/share')
+                                                                      const url = data?.url || ''
+                                                                      setShareUrl(url)
+                                                                      if (url) {
+                                                                           try {
+                                                                                const dataUrl = await QRCode.toDataURL(url, { margin: 1, scale: 4 })
+                                                                                setQrDataUrl(dataUrl)
+                                                                           } catch (_) {}
+                                                                      }
+                                                                 } catch (e) {
+                                                                      setShareError(e?.message || 'Failed to create share link')
+                                                                 } finally {
+                                                                      setSharing(false)
+                                                                 }
+                                                            }}
+                                                            className={`px-2 py-1 rounded border ${sharing ? 'border-slate-700 bg-slate-800 text-slate-400' : 'border-slate-700 bg-slate-900 hover:bg-slate-800'} text-xs`}
+                                                            title="Create a share link and QR code"
+                                                       >{sharing ? 'Sharing…' : 'Share'}</button>
+                                                  </div>
                </div>
+                                    {(shareUrl || shareError) && (
+                                         <div className="rounded border border-slate-800 bg-slate-900 p-3 flex items-center gap-3">
+                                              {qrDataUrl ? (
+                                                   <img src={qrDataUrl} alt="QR code" className="w-24 h-24" />
+                                              ) : null}
+                                              <div className="flex-1">
+                                                   {shareError ? (
+                                                        <div className="text-sm text-rose-400">{shareError}</div>
+                                                   ) : (
+                                                        <>
+                                                             <div className="text-sm text-slate-300">Scan the QR or copy the link to view this report without signing in:</div>
+                                                             <div className="mt-1 text-xs break-all text-primary">{shareUrl}</div>
+                                                             <div className="mt-2 flex items-center gap-2">
+                                                                  <button onClick={() => navigator.clipboard.writeText(shareUrl)} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs">Copy link</button>
+                                                                  <button onClick={() => { setShareUrl(''); setQrDataUrl(''); setShareError('') }} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs">Hide</button>
+                                                             </div>
+                                                        </>
+                                                   )}
+                                              </div>
+                                         </div>
+                                    )}
 
                {Array.isArray(symbols) && symbols.length > 0 && (
                     <div className="flex gap-2 overflow-x-auto py-1">
@@ -95,7 +150,10 @@ export default function ReportView({ report }) {
                               const up = Number.isFinite(chg) && chg >= 0
                               return (
                                    <div key={sym} className="flex items-center gap-3 rounded border border-slate-800 bg-slate-900 px-3 py-2">
-                                        <div className="font-semibold">{sym}</div>
+                                        <div className="flex items-center font-semibold">
+                                             <span>{sym}</span>
+                                             <FavoriteStar symbol={sym} size="xs" />
+                                        </div>
                                         <div className="text-slate-200">{Number.isFinite(last) ? formatCurrency(last, settings?.currency) : '—'}</div>
                                         {Number.isFinite(chg) && (
                                              <div className={`flex items-center gap-1 text-xs ${up ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -132,7 +190,7 @@ export default function ReportView({ report }) {
                     </div>
                )}
 
-               {rep.explanation && (
+               {(rep.explanation || rep.explanation_simple) && (
                     <div className="rounded border border-slate-800 bg-slate-900 p-4">
                                                             <div className="font-semibold mb-3">Summary & Recommendations</div>
                                                             {settings?.beginnerMode && (
@@ -157,7 +215,7 @@ export default function ReportView({ report }) {
                                    code: ({ children }) => <code className="bg-slate-800/80 text-slate-100 px-1 py-0.5 rounded">{children}</code>,
                               }}
                          >
-                              {rep.explanation}
+                              {settings?.beginnerMode && rep.explanation_simple ? rep.explanation_simple : rep.explanation}
                          </ReactMarkdown>
                     </div>
                )}
@@ -331,6 +389,48 @@ export default function ReportView({ report }) {
                                   </li>
                              ))}
                          </ul>
+                    </div>
+               )}
+
+               {rep.news_impact && Object.keys(rep.news_impact).length > 0 && (
+                    <div className="rounded border border-slate-800 bg-slate-900 p-4">
+                         <div className="font-semibold mb-2">News‑driven Impact (experimental)</div>
+                         {settings?.beginnerMode && (
+                              <div className="text-sm text-slate-200 bg-slate-800/60 rounded p-3 mb-2">
+                                   We skim headlines for positive/negative words about your symbols to guess short‑term direction. It’s a rough hint, not advice.
+                              </div>
+                         )}
+                         <div className="flex flex-wrap gap-2 mb-2">
+                              {Object.entries(rep.news_impact).map(([sym, obj]) => {
+                                   const dir = obj?.direction
+                                   const cls = dir === 'increase' ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' : dir === 'decrease' ? 'text-rose-400 border-rose-500/30 bg-rose-500/10' : 'text-slate-300 border-slate-700 bg-slate-800'
+                                   const icon = dir === 'increase' ? '▲' : dir === 'decrease' ? '▼' : '•'
+                                   return (
+                                        <span key={sym} className={`px-2 py-1 rounded text-xs border ${cls}`}>{sym}: {icon} {dir}</span>
+                                   )
+                              })}
+                         </div>
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {Object.entries(rep.news_impact).map(([sym, obj]) => (
+                                   <div key={sym} className="rounded border border-slate-800 bg-slate-900/60 p-3">
+                                        <div className="font-semibold mb-1">{sym}</div>
+                                        <ul className="list-disc list-inside text-slate-200 text-sm">
+                                             {(obj?.headlines || []).slice(0,3).map((h, i) => (
+                                                  <li key={i}>
+                                                       {h.url ? (
+                                                            <a href={h.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{h.title}</a>
+                                                       ) : (
+                                                            <span>{h.title}</span>
+                                                       )}
+                                                       {typeof h.score === 'number' && (
+                                                            <span className={`ml-2 text-xs ${h.score > 0 ? 'text-emerald-400' : h.score < 0 ? 'text-rose-400' : 'text-slate-400'}`}>{h.score > 0 ? '+pos' : h.score < 0 ? '-neg' : 'neutral'}</span>
+                                                       )}
+                                                  </li>
+                                             ))}
+                                        </ul>
+                                   </div>
+                              ))}
+                         </div>
                     </div>
                )}
           </div>

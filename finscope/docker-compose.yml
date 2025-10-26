@@ -9,6 +9,7 @@ services:
     environment:
       - PYTHON_SERVICE_URL=http://py-api:8000
       - REDIS_URL=redis://redis:6379/0
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:5173}
     ports:
       - "4000:4000"
     restart: unless-stopped

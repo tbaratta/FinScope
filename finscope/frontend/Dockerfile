@@ -3,7 +3,8 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 # Copy lockfiles first and install with npm ci for reproducible builds
 COPY package.json package-lock.json ./
-RUN npm ci --no-fund --no-audit
+# Prefer reproducible installs; if lockfile is out of sync (hackathon speed), fall back to npm install
+RUN npm ci --no-fund --no-audit || npm install --no-fund --no-audit
 COPY . .
 # Inject Vite env at build-time so import.meta.env has values in the built app
 ARG VITE_API_BASE_URL

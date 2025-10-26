@@ -16,6 +16,7 @@ import reportRoutes from './routes/report.js'
 import agentsRoutes from './routes/agents.js'
 import plaidRoutes from './routes/plaid.js'
 import settingsRoutes from './routes/settings.js'
+import shareRoutes from './routes/share.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.resolve(__dirname, '../../.env') })
@@ -62,7 +63,7 @@ if (missingRecommended.length) {
 app.get('/api/health/config', (_req, res) => {
   res.json({
     ok: true,
-    required: requiredEnv,
+    required: [],
     missing: [],
   })
 })
@@ -87,6 +88,34 @@ app.use('/api/report', reportRoutes)
 app.use('/api/agents', agentsRoutes)
 app.use('/api/plaid', plaidRoutes)
 app.use('/api/settings', settingsRoutes)
+app.use('/api/share', shareRoutes)
 
 const PORT = process.env.PORT || 4000
 app.listen(PORT, () => console.log(`Node API listening on :${PORT}`))
+
+// --- Automatic cache pre-warm (optional) ---
+const PREWARM_ON_START = process.env.PREWARM_ON_START !== '0'
+const PREWARM_INTERVAL_MINUTES = Number(process.env.PREWARM_INTERVAL_MINUTES || 0)
+const PREWARM_SYMBOLS = (process.env.PREWARM_SYMBOLS || 'SPY,QQQ,DIA')
+  .split(',').map(s => s.trim().toUpperCase()).filter(Boolean).slice(0, 5)
+
+async function prewarmCaches() {
+  const base = `http://localhost:${PORT}`
+  try {
+    // Warm dashboard summary (keys may be missing; ignore errors)
+    try { await axios.get(`${base}/api/data/summary`, { timeout: 15000 }) } catch (_) {}
+    // Warm agent pipeline in fast mode for selected symbols
+    const payload = PREWARM_SYMBOLS.length ? { symbols: PREWARM_SYMBOLS } : { symbols: ['SPY'] }
+    try { await axios.post(`${base}/api/agents/report?fast=1`, payload, { timeout: 30000 }) } catch (_) {}
+    console.log('[prewarm] Completed pre-warm of summary and report caches')
+  } catch (e) {
+    console.warn('[prewarm] Failed:', e?.message)
+  }
+}
+
+if (PREWARM_ON_START) {
+  setTimeout(prewarmCaches, 4000)
+}
+if (PREWARM_INTERVAL_MINUTES > 0) {
+  setInterval(prewarmCaches, Math.max(1, PREWARM_INTERVAL_MINUTES) * 60 * 1000)
+}

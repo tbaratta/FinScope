@@ -84,7 +84,7 @@ async function fetchSeries(symbol, period = '6mo', interval = '1d') {
   return data
 }
 
-async function runTeacher(summaryInput, teacherConfig) {
+async function runTeacher(summaryInput, teacherConfig, isBeginner = false) {
   const apiKey = process.env.ADK_API_KEY || process.env.GOOGLE_API_KEY
   if (!apiKey) return { explanation: 'Gemini API key not configured.' }
   const genAI = new GoogleGenerativeAI(apiKey)
@@ -96,12 +96,17 @@ async function runTeacher(summaryInput, teacherConfig) {
     'You are FinScope Mission Control Teacher. Provide concise, actionable, educational insights.',
     'Do NOT provide personalized financial advice. Include disclaimers where appropriate.',
     teacherInstr,
+    isBeginner
+      ? 'Write in very simple language (5th–6th grade). Avoid jargon. If a term is unavoidable (like CPI, 10Y yield, unemployment), briefly define it in parentheses the first time. Use short sentences and clear bullets. Keep it friendly and reassuring.'
+      : null,
     'Structure your response into clear sections:',
     '- Market Overview',
     '- Macro Watch (explain 10Y, CPI YoY, Unemployment if present)',
     '- Headlines Snapshot (cite sources briefly)',
     '- Technicals Snapshot (volatility, SMA trends, 6m high/low proximity)',
-    '- Educational Recommendations (3-5 items) with rationale and risk notes',
+    isBeginner
+      ? '- What This Means In Simple Words (3–5 short bullets)'
+      : '- Educational Recommendations (3-5 items) with rationale and risk notes',
     '- Next Steps (3 bullets)'
   ].filter(Boolean).join('\n')
   const prompt = `${system}\n\nContext JSON:\n${JSON.stringify(summaryInput, null, 2)}`
@@ -111,6 +116,63 @@ async function runTeacher(summaryInput, teacherConfig) {
     return { explanation: reply }
   } catch (e) {
     return { explanation: `LLM failed: ${e?.message || e}` }
+  }
+}
+
+// Build a very simple, rule-based beginner explanation as a fallback when no LLM key is present
+function buildSimpleExplanation({ symbols, asset_overview, macro, headlines, invest }) {
+  try {
+    const lines = []
+    lines.push('# In simple words')
+    // Market overview
+    if (Array.isArray(symbols) && symbols.length) {
+      lines.push('## Today\'s moves')
+      const rows = symbols.map((s) => {
+        const o = asset_overview?.[s] || {}
+        const chg = Number(o.changePct)
+        if (!Number.isFinite(chg)) return `- ${s}: no data`
+        const up = chg >= 0
+        return `- ${s}: ${up ? 'up' : 'down'} ${Math.abs(chg).toFixed(2)}%`
+      })
+      lines.push(...rows)
+    }
+    // Macro
+    const hasMacro = macro && (macro.ten_year_yield_pct != null || macro.cpi_yoy_pct != null || macro.unemployment_rate_pct != null)
+    if (hasMacro) {
+      lines.push('## Big picture (macro)')
+      if (macro.ten_year_yield_pct != null) lines.push(`- 10-year yield (what the US pays to borrow): ${Number(macro.ten_year_yield_pct).toFixed(2)}%`)
+      if (macro.cpi_yoy_pct != null) lines.push(`- Inflation (CPI YoY): ${Number(macro.cpi_yoy_pct).toFixed(2)}%`)
+      if (macro.unemployment_rate_pct != null) lines.push(`- Unemployment: ${Number(macro.unemployment_rate_pct).toFixed(2)}%`)
+      lines.push('- Higher yields often mean borrowing is more expensive.\n- Lower inflation is usually good for shoppers and businesses.\n- Unemployment shows how many people can\'t find jobs.')
+    }
+    // Headlines
+    if (Array.isArray(headlines) && headlines.length) {
+      lines.push('## Top stories')
+      headlines.slice(0, 3).forEach((h) => {
+        if (h?.title) lines.push(`- ${h.title}${h.source ? ` — ${h.source}` : ''}`)
+      })
+    }
+    // Actionable but safe
+    lines.push('## What to consider (not advice)')
+    if (invest && !invest.error) {
+      if (typeof invest.signal === 'string') {
+        const sig = String(invest.signal)
+        if (sig.includes('rebalance')) {
+          lines.push('- Markets look bouncy. A small shift to safer assets can smooth the ride.')
+        } else if (sig.includes('hold')) {
+          lines.push('- No big changes needed today. Keep an eye on the week ahead.')
+        }
+      }
+    }
+    lines.push('- If you buy or sell, do it slowly and in small steps.\n- Diversify (don\'t put all your eggs in one basket).')
+    // Next steps
+    lines.push('## Next steps')
+    lines.push('- Check your top 1–2 holdings: are they up or down today?')
+    lines.push('- Skim the top story and think: could it affect your plan?')
+    lines.push('- Revisit next week — one day rarely changes the big picture.')
+    return lines.join('\n')
+  } catch {
+    return 'Today: markets moved a bit. Keep calm, diversify, and review weekly.'
   }
 }
 
@@ -157,6 +219,58 @@ async function fetchNewsHeadlines() {
   }
 }
 
+// --- Simple sentiment and symbol mapping from headlines ---
+function headlineSentiment(text = '') {
+  const t = String(text).toLowerCase()
+  const pos = ['beat', 'beats', 'surge', 'surges', 'rally', 'rallies', 'rise', 'rises', 'up', 'record', 'strong', 'optimistic', 'bull', 'expand', 'growth', 'gain', 'gains', 'rebound', 'improve']
+  const neg = ['miss', 'misses', 'plunge', 'plunges', 'fall', 'falls', 'down', 'drop', 'drops', 'weak', 'pessimistic', 'bear', 'cut', 'cuts', 'downgrade', 'downgrades', 'fear', 'fears', 'concern', 'concerns', 'risk', 'risks']
+  let score = 0
+  for (const w of pos) if (t.includes(w)) score += 1
+  for (const w of neg) if (t.includes(w)) score -= 1
+  return score // integer; >0 positive, <0 negative
+}
+
+function symbolSynonyms(sym) {
+  const s = String(sym).toUpperCase()
+  const map = {
+    'SPY': ['s&p', 's&p 500', 'sp500', 's and p'],
+    'QQQ': ['nasdaq', 'nasdaq-100', 'nasdaq 100'],
+    'DIA': ['dow', 'dow jones', 'djia'],
+    '^VIX': ['vix', 'volatility index'],
+    'BTC-USD': ['bitcoin', 'btc', 'crypto']
+  }
+  return [s, ...(map[s] || [])]
+}
+
+function buildNewsImpact(symbols, headlines) {
+  const impact = {}
+  const list = Array.isArray(headlines) ? headlines : []
+  const syms = Array.isArray(symbols) ? symbols : []
+  for (const sym of syms) {
+    const syns = symbolSynonyms(sym)
+    const items = []
+    for (const h of list) {
+      const title = String(h?.title || '')
+      if (!title) continue
+      const lt = title.toLowerCase()
+      const matches = syns.some(k => lt.includes(String(k).toLowerCase()))
+      if (!matches) continue
+      const sc = headlineSentiment(title)
+      items.push({ title, source: h?.source, url: h?.url, score: sc })
+    }
+    if (items.length) {
+      const total = items.reduce((a, b) => a + (Number(b.score) || 0), 0)
+      const dir = total > 0.5 ? 'increase' : total < -0.5 ? 'decrease' : 'neutral'
+      impact[sym] = {
+        direction: dir,
+        score: total,
+        headlines: items.slice(0, 5)
+      }
+    }
+  }
+  return impact
+}
+
 router.post('/report', async (req, res) => {
   const run = { steps: [] }
   try {
@@ -168,8 +282,9 @@ router.post('/report', async (req, res) => {
 
   const { positions, symbols } = extractPositionsFromPayload(req.body || {})
   const isFast = (String(req.query?.fast || '').toLowerCase() === '1') || (req.body && req.body.fast === true)
+  const isBeginner = (String(req.query?.beginner || '').toLowerCase() === '1') || (req.body && req.body.beginner === true)
   run.mode = isFast ? 'fast' : 'full'
-  run.input = { symbols, positions }
+  run.input = { symbols, positions, beginner: isBeginner }
 
     // Step 1: Data (via Python service)
   const seriesMap = {}
@@ -266,6 +381,14 @@ router.post('/report', async (req, res) => {
     }
     run.steps.push({ name: 'MacroNews', type: 'context', status: 'ok', output: { macro, headlinesCount: headlines.length } })
 
+      // Step 3.1: News-driven impact (simple sentiment mapping)
+      const news_impact = buildNewsImpact(okSymbols, headlines)
+      if (Object.keys(news_impact).length) {
+        run.steps.push({ name: 'NewsImpact', type: 'analysis', status: 'ok', output: Object.fromEntries(Object.entries(news_impact).map(([k,v]) => [k, v.direction])) })
+      } else {
+        run.steps.push({ name: 'NewsImpact', type: 'analysis', status: 'empty' })
+      }
+
     // Step 3.2: Personal finances (Plaid transactions summary via Python DB)
     let personal_finance = null
     try {
@@ -359,11 +482,16 @@ router.post('/report', async (req, res) => {
 
     // Step 5: Teacher (LLM explanation across market, macro, news, technicals, forecasts, invest)
     let teacherOut
+    let teacherOutSimple
     if (!isFast) {
-      teacherOut = await runTeacher({ symbols: okSymbols, asset_overview, macro, headlines, technicals, analysis, forecast, personal_finance }, teacherAgent)
-      run.steps.push({ name: teacherAgent?.name || 'TeacherAgent', type: 'teach', status: 'ok', output: teacherOut })
+      // Try to generate either normal or beginner explanation depending on flag
+      teacherOut = await runTeacher({ symbols: okSymbols, asset_overview, macro, headlines, technicals, analysis, forecast, personal_finance }, teacherAgent, !!isBeginner)
+      // If we generated a beginner-focused explanation, treat it as simple; otherwise build a rule-based one
+      teacherOutSimple = isBeginner && teacherOut?.explanation ? teacherOut : { explanation: buildSimpleExplanation({ symbols: okSymbols, asset_overview, macro, headlines, invest }) }
+      run.steps.push({ name: teacherAgent?.name || 'TeacherAgent', type: 'teach', status: 'ok', output: { normal: !isBeginner, beginner: !!isBeginner } })
     } else {
       teacherOut = { explanation: 'Quick preview mode — forecasts and detailed explanation skipped. Generate full report for deeper insights.' }
+      teacherOutSimple = { explanation: buildSimpleExplanation({ symbols: okSymbols, asset_overview, macro, headlines, invest }) }
       run.steps.push({ name: 'TeacherAgent', type: 'teach', status: 'skipped' })
     }
 
@@ -390,11 +518,13 @@ router.post('/report', async (req, res) => {
       asset_overview,
       macro,
       headlines,
+  news_impact,
       analysis,
       forecast,
       invest,
       personal_finance,
       explanation: teacherOut?.explanation || '',
+      explanation_simple: teacherOutSimple?.explanation || buildSimpleExplanation({ symbols: okSymbols, asset_overview, macro, headlines, invest }),
     }
     // Cache the latest report for contextual chat
     try { setLastReport(report) } catch {}

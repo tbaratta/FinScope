@@ -4,12 +4,14 @@ import { api } from '../utils/api'
 import DataCards from '../components/DataCards'
 import ReportView from '../components/ReportView'
 import { useSettings } from '../hooks/useSettings.jsx'
+import FavoriteReports from '../components/FavoriteReports.jsx'
  
 export default function Dashboard() {
   const { settings } = useSettings()
   const [cards, setCards] = useState([])
   const [agentReport, setAgentReport] = useState(null)
   const [symbolsText, setSymbolsText] = useState(settings.defaultSymbols || 'SPY, QQQ, DIA')
+  const [includeFavorites, setIncludeFavorites] = useState(false)
   const [agentLoading, setAgentLoading] = useState(false)
   const [error, setError] = useState('')
   const [showSymbolsNav, setShowSymbolsNav] = useState(true)
@@ -70,17 +72,20 @@ export default function Dashboard() {
   }, [showSymbolsNav])
  
   const generateReport = async () => {
-    const symbols = symbolsText
+    const baseSymbols = symbolsText
       .split(',')
       .map(s => s.trim().toUpperCase())
       .filter(Boolean)
-      .slice(0, 10)
+    const favs = includeFavorites && Array.isArray(settings?.favorites)
+      ? settings.favorites.map(s => String(s).toUpperCase()).filter(Boolean)
+      : []
+    const symbols = Array.from(new Set([...baseSymbols, ...favs])).slice(0, 10)
     setError('')
     setAgentLoading(true)
     try {
       const payload = symbols.length ? { symbols } : { symbols: ['SPY'] }
-      const { data } = await api.post('/api/agents/report', payload)
-      setAgentReport(data || null)
+  const res = await api.post('/api/agents/report', payload, { params: { beginner: settings?.beginnerMode ? 1 : undefined } })
+  setAgentReport(res?.data || null)
     } catch (err) {
       setError(err?.message || 'Failed to generate report')
     } finally {
@@ -88,17 +93,46 @@ export default function Dashboard() {
     }
   }
  
+  const openFullReportForSymbol = async (symOrPayload) => {
+    if (symOrPayload && typeof symOrPayload === 'object' && symOrPayload.report) {
+      setAgentReport(symOrPayload)
+      setTimeout(() => { try { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }) } catch (_) {} }, 50)
+      return
+    }
+    try {
+      setAgentLoading(true)
+      const sym = String(symOrPayload).toUpperCase()
+      const payload = { symbols: [sym] }
+      const res = await api.post('/api/agents/report', payload, { params: { beginner: settings?.beginnerMode ? 1 : undefined } })
+      setAgentReport(res?.data || null)
+      // Scroll to report view
+      setTimeout(() => { try { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }) } catch (_) {} }, 50)
+    } catch (err) {
+      setError(err?.message || 'Failed to generate report')
+    } finally {
+      setAgentLoading(false)
+    }
+  }
+
+  const openQuickPayload = (payload) => {
+    setAgentReport(payload || null)
+    setTimeout(() => { try { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }) } catch (_) {} }, 50)
+  }
+
   const runAgents = async () => {
     try {
       setAgentLoading(true)
-      const symbols = symbolsText
+      const baseSymbols = symbolsText
         .split(',')
         .map(s => s.trim().toUpperCase())
         .filter(Boolean)
-        .slice(0, 10) // keep it reasonable
+      const favs = includeFavorites && Array.isArray(settings?.favorites)
+        ? settings.favorites.map(s => String(s).toUpperCase()).filter(Boolean)
+        : []
+      const symbols = Array.from(new Set([...baseSymbols, ...favs])).slice(0, 10) // keep it reasonable
       const payload = symbols.length ? { symbols } : { symbols: ['SPY'] }
-      const { data } = await api.post('/api/agents/report', payload)
-      setAgentReport(data || null)
+  const res = await api.post('/api/agents/report', payload, { params: { beginner: settings?.beginnerMode ? 1 : undefined } })
+    setAgentReport(res?.data || null)
     } catch (err) {
       setAgentReport({ error: 'Agent run failed', detail: err?.message })
     }
@@ -121,6 +155,15 @@ export default function Dashboard() {
                 className="bg-transparent border-none outline-none w-full text-slate-200 text-sm placeholder:text-slate-600 focus:ring-0"
               />
             </div>
+            <label className="flex items-center gap-2 text-xs text-slate-400 select-none">
+              <input
+                type="checkbox"
+                checked={includeFavorites}
+                onChange={(e) => setIncludeFavorites(e.target.checked)}
+                className="accent-primary w-3.5 h-3.5"
+              />
+              Include favorites
+            </label>
             {agentLoading ? (
               <Loader />
             ) : (
@@ -141,6 +184,8 @@ export default function Dashboard() {
         <div className="lg:col-span-3">
           <DataCards cards={cards} />
         </div>
+
+        <FavoriteReports onOpenQuickReport={openQuickPayload} onOpenFullReport={openFullReportForSymbol} />
  
         {agentReport ? (
           <ReportView report={agentReport} />

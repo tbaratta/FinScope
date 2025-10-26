@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import PlaidConnect from './PlaidConnect'
 import { useSettings } from '../hooks/useSettings.jsx'
+import { api } from '../utils/api'
 
 export default function SettingsModal({ open, onClose }) {
   const { settings, updateSettings } = useSettings()
@@ -9,6 +10,9 @@ export default function SettingsModal({ open, onClose }) {
   const [currency, setCurrency] = useState(settings.currency || 'USD')
   const [timezone, setTimezone] = useState(settings.timezone || 'America/New_York')
   const [beginnerMode, setBeginnerMode] = useState(!!settings.beginnerMode)
+  const [favoritesText, setFavoritesText] = useState(Array.isArray(settings.favorites) ? settings.favorites.join(', ') : '')
+  const [warming, setWarming] = useState(false)
+  const [warmMsg, setWarmMsg] = useState('')
 
   useEffect(() => {
     if (open) {
@@ -17,9 +21,36 @@ export default function SettingsModal({ open, onClose }) {
       setCurrency(settings.currency || 'USD')
       setTimezone(settings.timezone || 'America/New_York')
       setBeginnerMode(!!settings.beginnerMode)
+      setFavoritesText(Array.isArray(settings.favorites) ? settings.favorites.join(', ') : '')
     }
   }, [open])
   if (!open) return null
+
+  const prewarmCaches = async () => {
+    setWarmMsg('')
+    setWarming(true)
+    try {
+      // Parse up to 5 symbols from current input
+      const symbols = (defaultSymbols || '')
+        .split(',')
+        .map(s => s.trim().toUpperCase())
+        .filter(Boolean)
+        .slice(0, 5)
+      const bust = Date.now()
+      // Warm summary (Alpha/FRED/BTC via Node) — ignore failure if keys missing
+      try { await api.get('/api/data/summary', { params: { _pw: bust } }) } catch (_) {}
+      // Warm per-symbol market caches in Node+Python and generate a quick report (fast)
+      const payload = symbols.length ? { symbols } : { symbols: ['SPY'] }
+      try {
+        await api.post('/api/agents/report', payload, { params: { fast: 1, beginner: beginnerMode ? 1 : undefined, _pw: bust } })
+      } catch (_) {}
+      setWarmMsg('Caches pre-warmed for summary and report (valid ~60–600s).')
+    } catch (e) {
+      setWarmMsg('Pre-warm failed. You can still generate a report normally.')
+    } finally {
+      setWarming(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50">
@@ -71,12 +102,34 @@ export default function SettingsModal({ open, onClose }) {
                     <span className="text-xs text-slate-400">Simplify the report and explain concepts in plain language.</span>
                   </div>
                 </label>
+                <label className="flex flex-col gap-2 md:col-span-2">
+                  <span className="text-sm text-slate-300">Favorite tickers (comma‑separated)</span>
+                  <input value={favoritesText} onChange={(e)=>setFavoritesText(e.target.value)} className="rounded bg-slate-800 border border-slate-700 px-3 py-2" placeholder="AAPL, MSFT, TSLA" />
+                  <span className="text-xs text-slate-500">We’ll show quick “ready” reports for your favorites on the Dashboard.</span>
+                </label>
               </div>
               <div className="mt-4">
                 <button
-                  onClick={() => { updateSettings({ defaultSymbols, chartDays: Number(chartDays), currency, timezone, beginnerMode }); onClose?.() }}
+                  onClick={() => { 
+                    const favorites = (favoritesText || '')
+                      .split(',')
+                      .map(s => s.trim().toUpperCase())
+                      .filter(Boolean)
+                      .slice(0, 20)
+                    updateSettings({ defaultSymbols, chartDays: Number(chartDays), currency, timezone, beginnerMode, favorites }); 
+                    onClose?.() 
+                  }}
                   className="px-3 py-2 rounded bg-primary"
                 >Save</button>
+                <button
+                  onClick={prewarmCaches}
+                  disabled={warming}
+                  className={`ml-3 px-3 py-2 rounded ${warming ? 'bg-slate-700' : 'bg-slate-800 hover:bg-slate-700'} border border-slate-700`}
+                  title="Warm cached data for faster first load"
+                >{warming ? 'Pre-warming…' : 'Pre-warm caches'}</button>
+                {warmMsg && (
+                  <span className="ml-3 text-xs text-slate-400">{warmMsg}</span>
+                )}
               </div>
             </section>
             <section>
