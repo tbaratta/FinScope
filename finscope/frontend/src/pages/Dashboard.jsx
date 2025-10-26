@@ -113,7 +113,7 @@ export default function Dashboard() {
         <div className="inline-flex flex-col bg-slate-900/95 backdrop-blur supports-backdrop-blur:bg-slate-900/80 border-x border-b border-slate-800 rounded-b-lg">
           <div className="flex items-center gap-3 px-4 py-2">
             <div className="flex items-center gap-2 bg-slate-800/60 hover:bg-slate-800/80 border border-slate-700/50 rounded-md px-3 py-1.5 w-80 transition-colors">
-              <label className="text-sm font-medium text-slate-400">Symbols:</label>
+              <label className="text-sm font-medium text-slate-400">Tickers:</label>
               <input
                 value={symbolsText}
                 onChange={(e) => setSymbolsText(e.target.value)}

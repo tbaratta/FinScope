@@ -1,5 +1,38 @@
 import { useAuth } from '../hooks/useAuth'
-import scopeLogo from '../assets/scope.png'
+
+function FinScopeLogo() {
+  return (
+    <svg width="80" height="80" viewBox="0 0 64 64" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-label="FinScope Logo">
+      {/* Outer scope ring */}
+      <circle cx="32" cy="32" r="20" stroke="currentColor" strokeWidth="2" />
+
+      {/* Crosshair */}
+      <line x1="32" y1="10" x2="32" y2="18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="32" y1="46" x2="32" y2="54" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="10" y1="32" x2="18" y2="32" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+      <line x1="46" y1="32" x2="54" y2="32" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+
+      {/* Inner ring */}
+      <circle cx="32" cy="32" r="12" stroke="currentColor" strokeWidth="2" strokeOpacity="0.6"/>
+
+      {/* Candlesticks */}
+      <line x1="24" y1="40" x2="24" y2="26" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+      <rect x="22" y="32" width="4" height="6" rx="1" fill="currentColor"/>
+
+      <line x1="32" y1="42" x2="32" y2="22" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+      <rect x="30" y="28" width="4" height="10" rx="1" fill="currentColor"/>
+
+      <line x1="40" y1="38" x2="40" y2="28" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+      <rect x="38" y="31" width="4" height="5" rx="1" fill="currentColor"/>
+
+      {/* Trend line */}
+      <path d="M22 38 L28 34 L32 29 L36 31 L40 27"
+            fill="none" stroke="currentColor" strokeWidth="1.8"
+            strokeLinecap="round" strokeLinejoin="round" strokeOpacity="0.8"/>
+    </svg>
+  )
+}
 
 export default function NavBar({ onOpenSettings }) {
   const { session, signOut } = useAuth()
@@ -7,8 +40,8 @@ export default function NavBar({ onOpenSettings }) {
     <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-10">
       <div className="max-w-7xl mx-auto p-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <img src={scopeLogo} alt="FinScope" className="w-10 h-10 object-contain" />
-          <h1 className="font-bold text-lg">FinScope: AI Financial Mission Control</h1>
+          <span className="text-sky-400"><FinScopeLogo /></span>
+          {/* <h1 className="font-bold text-lg">FinScope: AI Financial Mission Control</h1> */}
         </div>
         <nav className="flex gap-3 items-center">
           {session ? (
@@ -26,3 +59,5 @@ export default function NavBar({ onOpenSettings }) {
     </header>
   )
 }
+
+
