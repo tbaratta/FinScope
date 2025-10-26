@@ -6,10 +6,14 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
-    strictPort: true
+    strictPort: true,
+    // Allow any Cloudflare quick-tunnel hostname and localhost
+    allowedHosts: [/\.trycloudflare\.com$/, 'localhost']
   },
   preview: {
     port: 5173,
-    host: true
+    host: true,
+    // Accept any Cloudflare quick-tunnel hostname and localhost
+    allowedHosts: [/\.trycloudflare\.com$/, 'localhost']
   }
 })

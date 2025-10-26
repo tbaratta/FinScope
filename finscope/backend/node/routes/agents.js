@@ -271,6 +271,18 @@ function buildNewsImpact(symbols, headlines) {
   return impact
 }
 
+// Helpful GET handler to avoid "Cannot GET" confusion; instructs clients to POST
+router.get('/report', (_req, res) => {
+  return res.status(405).json({
+    error: 'Method Not Allowed: use POST /api/agents/report',
+    hint: 'Send JSON body like { "symbols": ["SPY","QQQ"], "fast": true }',
+    example: {
+      url: '/api/agents/report?fast=1',
+      body: { symbols: ['SPY', 'QQQ'] }
+    }
+  })
+})
+
 router.post('/report', async (req, res) => {
   const run = { steps: [] }
   try {

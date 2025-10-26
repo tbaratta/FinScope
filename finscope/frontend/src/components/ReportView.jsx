@@ -84,6 +84,11 @@ export default function ReportView({ report }) {
 
      return (
           <div className="space-y-6">
+               {typeof rep.explanation === 'string' && rep.explanation.toLowerCase().includes('gemini api key not configured') && (
+                    <div className="rounded border border-amber-500/30 bg-amber-500/10 text-amber-200 text-sm p-3">
+                         AI teacher explanation is disabled because no Gemini API key is configured. Add ADK_API_KEY or GOOGLE_API_KEY in your .env to enable detailed summaries.
+                    </div>
+               )}
                <div className="flex flex-wrap items-center gap-2">
                     <div className="text-xl font-semibold">Today's FinScope Report</div>
                     <div className="text-slate-400 text-sm">{formatDateTime(rep.generated_at, settings?.timezone)}</div>

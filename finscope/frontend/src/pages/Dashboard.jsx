@@ -13,6 +13,8 @@ export default function Dashboard() {
   const [symbolsText, setSymbolsText] = useState(settings.defaultSymbols || 'SPY, QQQ, DIA')
   const [includeFavorites, setIncludeFavorites] = useState(false)
   const [agentLoading, setAgentLoading] = useState(false)
+  const [quickMode, setQuickMode] = useState(false)
+  const [configHint, setConfigHint] = useState('')
   const [error, setError] = useState('')
   const [showSymbolsNav, setShowSymbolsNav] = useState(true)
   const symbolsNavRef = useRef(null)
@@ -23,7 +25,14 @@ export default function Dashboard() {
       const res = await api.get('/api/data/summary', { cacheTTL: 60 })
       const summary = res.data || {}
       setCards(summary.cards || [])
-    } catch (_) { }
+      setConfigHint('')
+    } catch (err) {
+      // Surface a gentle hint when backend is missing required keys
+      const msg = err?.response?.data?.error || err?.message || ''
+      if (String(msg).toLowerCase().includes('missing api keys')) {
+        setConfigHint('Some API keys are missing (e.g., FRED, AlphaVantage). The dashboard summary may be limited. Configure .env as in README to enable full data.')
+      }
+    }
   }, [])
  
   useEffect(() => { computeChart() }, [computeChart])
@@ -84,7 +93,7 @@ export default function Dashboard() {
     setAgentLoading(true)
     try {
       const payload = symbols.length ? { symbols } : { symbols: ['SPY'] }
-  const res = await api.post('/api/agents/report', payload, { params: { beginner: settings?.beginnerMode ? 1 : undefined } })
+  const res = await api.post('/api/agents/report', payload, { params: { beginner: settings?.beginnerMode ? 1 : undefined, fast: quickMode ? 1 : undefined } })
   setAgentReport(res?.data || null)
     } catch (err) {
       setError(err?.message || 'Failed to generate report')
@@ -103,7 +112,7 @@ export default function Dashboard() {
       setAgentLoading(true)
       const sym = String(symOrPayload).toUpperCase()
       const payload = { symbols: [sym] }
-      const res = await api.post('/api/agents/report', payload, { params: { beginner: settings?.beginnerMode ? 1 : undefined } })
+      const res = await api.post('/api/agents/report', payload, { params: { beginner: settings?.beginnerMode ? 1 : undefined, fast: quickMode ? 1 : undefined } })
       setAgentReport(res?.data || null)
       // Scroll to report view
       setTimeout(() => { try { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }) } catch (_) {} }, 50)
@@ -131,7 +140,7 @@ export default function Dashboard() {
         : []
       const symbols = Array.from(new Set([...baseSymbols, ...favs])).slice(0, 10) // keep it reasonable
       const payload = symbols.length ? { symbols } : { symbols: ['SPY'] }
-  const res = await api.post('/api/agents/report', payload, { params: { beginner: settings?.beginnerMode ? 1 : undefined } })
+      const res = await api.post('/api/agents/report', payload, { params: { beginner: settings?.beginnerMode ? 1 : undefined, fast: quickMode ? 1 : undefined } })
     setAgentReport(res?.data || null)
     } catch (err) {
       setAgentReport({ error: 'Agent run failed', detail: err?.message })
@@ -164,6 +173,15 @@ export default function Dashboard() {
               />
               Include favorites
             </label>
+            <label className="flex items-center gap-2 text-xs text-slate-400 select-none">
+              <input
+                type="checkbox"
+                checked={quickMode}
+                onChange={(e) => setQuickMode(e.target.checked)}
+                className="accent-primary w-3.5 h-3.5"
+              />
+              Quick mode
+            </label>
             {agentLoading ? (
               <Loader />
             ) : (
@@ -176,6 +194,11 @@ export default function Dashboard() {
               </button>
             )}
           </div>
+          {configHint && (
+            <div className="px-4 pb-2 -mt-1 text-[11px] text-amber-300">
+              {configHint}
+            </div>
+          )}
           {error && <div className="text-xs text-red-400 text-center pb-2">{error}</div>}
         </div>
       </div>

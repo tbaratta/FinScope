@@ -25,7 +25,17 @@ const app = express()
 
 // Security & performance middleware
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN
-app.use(cors({ origin: FRONTEND_ORIGIN ? [FRONTEND_ORIGIN] : '*', credentials: false }))
+// Explicit CORS configuration to ensure preflight (OPTIONS) requests succeed via tunnels
+const corsOptions = {
+  origin: FRONTEND_ORIGIN ? [FRONTEND_ORIGIN] : '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false,
+  maxAge: 86400, // cache preflight for 24h
+}
+app.use(cors(corsOptions))
+// Ensure OPTIONS preflight is answered for all routes
+app.options('*', cors(corsOptions))
 app.use(helmet({ crossOriginResourcePolicy: false }))
 app.use(compression())
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 600 }))

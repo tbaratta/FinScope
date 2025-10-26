@@ -1,0 +1,21 @@
+# Minimal Caddy config for FinScope (Docker Compose)
+# Auto-TLS via Let's Encrypt. Replace fin.yourdomain.com with your domain.
+
+fin.yourdomain.com {
+    encode gzip
+
+    @api path /api/*
+    handle @api {
+        reverse_proxy 127.0.0.1:4000
+    }
+
+    @py path /py/*
+    handle @py {
+        reverse_proxy 127.0.0.1:8000
+    }
+
+    # Frontend (Vite preview server in container)
+    handle {
+        reverse_proxy 127.0.0.1:5173
+    }
+}
