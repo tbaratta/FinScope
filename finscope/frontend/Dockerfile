@@ -1,8 +1,9 @@
 # Frontend Dockerfile
 FROM node:20-alpine AS builder
 WORKDIR /app
-COPY package.json ./
-RUN npm install --no-fund --no-audit
+# Copy lockfiles first and install with npm ci for reproducible builds
+COPY package.json package-lock.json ./
+RUN npm ci --no-fund --no-audit
 COPY . .
 # Inject Vite env at build-time so import.meta.env has values in the built app
 ARG VITE_API_BASE_URL

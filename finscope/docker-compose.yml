@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   node-api:
     build:
@@ -10,16 +8,19 @@ services:
       - ./.env
     environment:
       - PYTHON_SERVICE_URL=http://py-api:8000
+      - REDIS_URL=redis://redis:6379/0
     ports:
       - "4000:4000"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:4000/api/health || exit 1"]
+      # Use busybox wget (available in alpine base images) to avoid needing curl in the container
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:4000/api/health >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
     depends_on:
       - py-api
+      - redis
     networks:
       - finscope-net
 
@@ -30,13 +31,16 @@ services:
     container_name: finscope-python
     env_file:
       - ./.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
     ports:
       - "8000:8000"
     restart: unless-stopped
     volumes:
       - ./data/python:/app/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      # Use Python stdlib to check health to avoid requiring curl/wget in slim images
+      test: ["CMD-SHELL", "python -c \"import sys,urllib.request; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health').getcode()==200 else sys.exit(1)\" || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -61,6 +65,21 @@ services:
     restart: unless-stopped
     depends_on:
       - node-api
+    networks:
+      - finscope-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: finscope-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - finscope-net
 

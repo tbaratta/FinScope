@@ -8,6 +8,7 @@ export default function SettingsModal({ open, onClose }) {
   const [chartDays, setChartDays] = useState(String(settings.chartDays || 7))
   const [currency, setCurrency] = useState(settings.currency || 'USD')
   const [timezone, setTimezone] = useState(settings.timezone || 'America/New_York')
+  const [beginnerMode, setBeginnerMode] = useState(!!settings.beginnerMode)
 
   useEffect(() => {
     if (open) {
@@ -15,6 +16,7 @@ export default function SettingsModal({ open, onClose }) {
       setChartDays(String(settings.chartDays || 7))
       setCurrency(settings.currency || 'USD')
       setTimezone(settings.timezone || 'America/New_York')
+      setBeginnerMode(!!settings.beginnerMode)
     }
   }, [open])
   if (!open) return null
@@ -62,10 +64,17 @@ export default function SettingsModal({ open, onClose }) {
                     <option value="America/Los_Angeles">America/Los_Angeles</option>
                   </select>
                 </label>
+                <label className="flex items-center gap-3 md:col-span-2">
+                  <input type="checkbox" checked={beginnerMode} onChange={(e)=>setBeginnerMode(e.target.checked)} className="h-4 w-4" />
+                  <div className="flex flex-col">
+                    <span className="text-sm text-slate-300">Beginner mode</span>
+                    <span className="text-xs text-slate-400">Simplify the report and explain concepts in plain language.</span>
+                  </div>
+                </label>
               </div>
               <div className="mt-4">
                 <button
-                  onClick={() => { updateSettings({ defaultSymbols, chartDays: Number(chartDays), currency, timezone }); onClose?.() }}
+                  onClick={() => { updateSettings({ defaultSymbols, chartDays: Number(chartDays), currency, timezone, beginnerMode }); onClose?.() }}
                   className="px-3 py-2 rounded bg-primary"
                 >Save</button>
               </div>

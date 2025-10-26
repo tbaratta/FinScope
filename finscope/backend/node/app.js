@@ -15,6 +15,7 @@ import forecastRoutes from './routes/forecast.js'
 import reportRoutes from './routes/report.js'
 import agentsRoutes from './routes/agents.js'
 import plaidRoutes from './routes/plaid.js'
+import settingsRoutes from './routes/settings.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.resolve(__dirname, '../../.env') })
@@ -85,6 +86,7 @@ app.use('/api/forecast', forecastRoutes)
 app.use('/api/report', reportRoutes)
 app.use('/api/agents', agentsRoutes)
 app.use('/api/plaid', plaidRoutes)
+app.use('/api/settings', settingsRoutes)
 
 const PORT = process.env.PORT || 4000
 app.listen(PORT, () => console.log(`Node API listening on :${PORT}`))
