@@ -195,10 +195,10 @@ export default function Dashboard() {
   className="flex flex-col items-center justify-center text-center px-4"
 >
   <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-sky-400 bg-clip-text text-transparent">
-    Generate Daily Financial Reports with FinScope
+    Your Daily Financial News with FinScope
   </h1>
   <p className="mt-6 text-base md:text-lg text-slate-300 max-w-2xl mx-auto leading-relaxed">
-    Simplify your investing with FinScope — an AI-powered platform that transforms market data and news into clear, personalized daily reports that keep you informed.
+    Stay informed every morning with FinScope, an AI-powered platform that delivers personalized financial insights, market trends, and news in one daily report.
   </p>
 </div>
 
