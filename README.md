@@ -4,7 +4,7 @@
 
 Stay informed without the noise. FinScope gathers market data and headlines, analyzes what matters, and delivers a clear daily report you can actually read — with a “Beginner Mode” that explains complex topics in plain English.
 
-• Live demo: https://app.finscope.us  • Video: <link>  • Devpost: <link>
+• Live demo: https://app.finscope.us ( No longer live :( )  • Video: <link>  • Devpost: <link>
 
 </div>
 
